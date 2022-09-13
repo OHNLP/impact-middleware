@@ -1,14 +1,16 @@
 package org.ohnlp.cat.dto;
 
+import java.util.UUID;
+
 public class ProjectDTO {
-    private String uid;
+    private UUID uid;
     private String name;
 
-    public String getUid() {
+    public UUID getUid() {
         return uid;
     }
 
-    public void setUid(String uid) {
+    public void setUid(UUID uid) {
         this.uid = uid;
     }
 

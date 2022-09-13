@@ -6,5 +6,6 @@ public enum ValueRelationType {
     GT,
     GTE,
     EQ,
-    RANGE
+    RANGE,
+    IN
 }

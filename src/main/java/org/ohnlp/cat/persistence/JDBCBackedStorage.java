@@ -4,21 +4,16 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mchange.v2.c3p0.ComboPooledDataSource;
 import org.ohnlp.cat.ApplicationConfiguration;
-import org.ohnlp.cat.dto.CohortDefinitionDTO;
-import org.ohnlp.cat.dto.PatInfoDTO;
-import org.ohnlp.cat.dto.ProjectDTO;
-import org.ohnlp.cat.dto.StructuredEvidenceDTO;
+import org.ohnlp.cat.dto.*;
 import org.ohnlp.cat.dto.enums.CohortInclusion;
+import org.ohnlp.cat.dto.enums.ProjectAuthorityGrant;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
 
 import java.beans.PropertyVetoException;
 import java.io.IOException;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -36,55 +31,166 @@ public class JDBCBackedStorage {
     }
 
     // ===== Project Management Methods ===== //
-    public List<ProjectDTO> getProjectList(Authentication authentication) {
+    public List<ProjectDTO> getProjectList(Authentication authentication) throws IOException {
         List<ProjectDTO> ret = new ArrayList<>();
         try (Connection conn = this.datasource.getConnection()) {
-            PreparedStatement ps = conn.prepareStatement("SELECT * FROM cat.projects p"); // TODO Handle shared project lookups
+            // If the user has any role grant, then user can at least view said project and it should be returned
+            // If the project exists in project archive (pa.row_uid is not null) then do not return to user.
+            PreparedStatement ps = conn.prepareStatement(
+                    "SELECT p.project_uid, p.project_name FROM cat.projects p " +
+                            "JOIN cat.project_role_grants prg ON p.project_uid = prg.project_uid " +
+                            "LEFT JOIN cat.project_archive pa ON p.project_uid = pa.project_uid " +
+                            "WHERE prg.user_uid = ? AND pa.row_uid IS NULL"
+            );
+            ps.setString(1, userIdForAuth(authentication));
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                ProjectDTO project = new ProjectDTO();
+                project.setName(rs.getString("project_name"));
+                project.setUid(UUID.fromString(rs.getString("project_uid")));
+                ret.add(project);
+            }
+            return ret;
         } catch (SQLException e) {
             e.printStackTrace();  // TODO log exceptions to db
+            throw new IOException("Error on Project List Retrieve", e);
         }
-        return ret;
+    }
+
+    public ProjectDTO createProject(Authentication authentication, String projectName) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            ProjectDTO ret = new ProjectDTO();
+            ret.setUid(UUID.randomUUID());
+            ret.setName(projectName);
+            // Begin atomic transaction block
+            conn.setAutoCommit(false);
+            // First, create the project itself
+            PreparedStatement createProjectPS = conn.prepareStatement("INSERT INTO cat.projects (project_uid, project_name) VALUES (?, ?)");
+            createProjectPS.setString(1, ret.getUid().toString().toUpperCase(Locale.ROOT));
+            createProjectPS.setString(2, ret.getName());
+            if (createProjectPS.executeUpdate() < 1) {
+                throw new IllegalStateException("Failed to create project due to 0-change write to projects");
+            }
+            // Now create the authority grant
+            PreparedStatement authorityGrantPS = conn.prepareStatement(
+                    "INSERT INTO cat.project_role_grants (project_uid, user_uid, grant_type) VALUES (?, ?, ?)");
+            authorityGrantPS.setString(1, ret.getUid().toString().toUpperCase(Locale.ROOT));
+            authorityGrantPS.setString(2, userIdForAuth(authentication));
+            authorityGrantPS.setString(3, ProjectAuthorityGrant.ADMIN.name());
+            if (authorityGrantPS.executeUpdate() < 1) {
+                throw new IllegalStateException("Failed to create project due to 0-change write to authority grants");
+            }
+            conn.commit();
+            conn.setAutoCommit(true);
+            return ret;
+        } catch (Throwable e) {
+            e.printStackTrace();  // TODO log exceptions to db
+            throw new IOException("Error on Project Creation", e);
+        }
+    }
+
+
+    public ProjectDTO renameProject(Authentication authentication, UUID projectUID, String projectName) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.ADMIN)) {
+                PreparedStatement updateProject = conn.prepareStatement("UPDATE cat.projects SET project_name = ? where project_uid = ?");
+                updateProject.setString(1, projectName);
+                updateProject.setString(2, projectUID.toString().toUpperCase(Locale.ROOT));
+                if (updateProject.executeUpdate() < 1) {
+                    throw new IllegalStateException("Failed to edit project due to 0-change write to projects");
+                }
+                ProjectDTO ret = new ProjectDTO();
+                ret.setName(projectName);
+                ret.setUid(projectUID);
+                return ret;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.ADMIN.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace();  // TODO log exceptions to db
+            throw new IOException("Error on Project List Retrieve", e);
+        }
+    }
+
+    public Boolean updateRoleGrants(Authentication authentication, ProjectRoleDTO role) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, role.getProject_uid(), authentication, ProjectAuthorityGrant.WRITE)) {
+                // Try update first
+                PreparedStatement updateRoles = conn.prepareStatement("UPDATE cat.PROJECT_ROLE_GRANTS SET grant_type = ? WHERE project_uid = ? AND user_uid = ?");
+                updateRoles.setString(1, role.getGrant().name());
+                updateRoles.setString(2, role.getProject_uid().toString().toUpperCase(Locale.ROOT));
+                updateRoles.setString(3, role.getUser_uid().toUpperCase(Locale.ROOT)); // TODO handle checking if user exists in system
+                if (updateRoles.executeUpdate() < 1) { // No preexisting role for user on project
+                    PreparedStatement insertRoles = conn.prepareStatement("INSERT INTO PROJECT_ROLE_GRANTS (project_uid, user_uid, grant_type) VALUES (?, ?, ?)");
+                    insertRoles.setString(1, role.getProject_uid().toString().toUpperCase(Locale.ROOT));
+                    insertRoles.setString(2, role.getUser_uid().toUpperCase(Locale.ROOT)); // TODO handle checking if user exists in system
+                    insertRoles.setString(3, role.getGrant().name()); //
+                    insertRoles.executeUpdate();
+                }
+                return true;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.WRITE.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace();  // TODO log exceptions to db
+            throw new IOException("Error on Project Role Update", e);
+        }
+    }
+
+    public Boolean archiveProject(Authentication authentication, UUID projectUID) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.ADMIN)) {
+                PreparedStatement updateArchive = conn.prepareStatement("INSERT INTO cat.PROJECT_ARCHIVE (project_uid) VALUES (?)");
+                updateArchive.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
+                if (updateArchive.executeUpdate() < 1) {
+                    return false;
+                }
+                return true;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.ADMIN.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace();  // TODO log exceptions to db
+            throw new IOException("Error on Project Archive", e);
+        }
+    }
+
+    public CriterionDefinitionDTO getProjectCriterion(Authentication authentication, UUID projectUID) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.READ)) {
+                PreparedStatement ps = conn.prepareStatement("SELECT criterion, revision_date FROM cat.PROJECT_CRITERION p WHERE project_uid = ? ORDER BY revision_date DESC");
+                ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    return om.get().readValue(rs.getString(1), CriterionDefinitionDTO.class);
+                }
+            }
+            return null;
+        } catch (SQLException | JsonProcessingException e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on project criteria retrieve", e);
+        }
+    }
+
+    public Boolean writeProjectCriterion(Authentication authentication, UUID projectUID, CriterionDefinitionDTO def) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.WRITE)) {
+                // Never try updating, instead always create new criterion definition with timestamp so that history is retained
+                PreparedStatement ps = conn.prepareStatement("INSERT INTO cat.project_criterion (project_uid, criterion, revision_date) VALUES (?, ?, ?)"); // TODO
+                ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
+                ps.setString(2, om.get().writeValueAsString(def));
+                ps.setTimestamp(3, new Timestamp(System.currentTimeMillis()));
+                ps.executeUpdate();
+                return true;
+            }
+            return false;
+        } catch (SQLException e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on project criteria write", e);
+        }
     }
 
     // ===== Cohort Related Methods ===== //
-    public CohortDefinitionDTO getCohortCriteria(Authentication authentication, UUID projectUID) throws IOException {
-        try (Connection conn = this.datasource.getConnection()) {
-            PreparedStatement ps = conn.prepareStatement("SELECT cohort_def FROM cat.cohorts p WHERE project_uid = ?"); // TODO
-            ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) {
-                return om.get().readValue(rs.getString(1), CohortDefinitionDTO.class);
-            } else {
-                return null; // No Cohort Definition Yet
-            }
-        } catch (SQLException | JsonProcessingException e) {
-            e.printStackTrace(); // TODO log exceptions to DB
-            throw new IOException("Error on cohort criteria retrieve", e);
-        }
-    }
-
-    public void writeCohortCriteria(Authentication authentication, UUID projectUID, CohortDefinitionDTO def) throws IOException {
-        try (Connection conn = this.datasource.getConnection()) {
-            // Manually check exists instead of using MERGE because not all SQL dialects support it
-            PreparedStatement checkExists = conn.prepareStatement("SELECT cohort_def FROM cat.cohort_defs c WHERE project_uid = ?");
-            checkExists.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
-            if (checkExists.executeQuery().next()) {
-                PreparedStatement ps = conn.prepareStatement("UPDATE cat.cohort_defs c SET cohort_def = ? WHERE project_uid = ?"); // TODO
-                ps.setString(1, om.get().writeValueAsString(def));
-                ps.setString(2, projectUID.toString().toUpperCase(Locale.ROOT));
-                ps.executeUpdate();
-            } else {
-                PreparedStatement ps = conn.prepareStatement("INSERT INTO cat.cohort_defs (project_uid, cohort_def) VALUES (?, ?)"); // TODO
-                ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
-                ps.setString(2, om.get().writeValueAsString(def));
-                ps.executeUpdate();
-            }
-        } catch (SQLException e) {
-            e.printStackTrace(); // TODO log exceptions to DB
-            throw new IOException("Error on cohort criteria write", e);
-        }
-    }
-
     // Gets the current evaluated cohort for a given project/user. TODO consider adding pagination in returned results (sort by score)
     public List<PatInfoDTO> getRetrievedCohort(Authentication authentication, UUID projectUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
@@ -124,7 +230,7 @@ public class JDBCBackedStorage {
             // Manually check exists instead of using MERGE because not all SQL dialects support it
             PreparedStatement checkExists = conn.prepareStatement(
                     "SELECT pat_id FROM cat.judgements " +
-                    "WHERE project_uid = ? AND pat_id = ? AND judger_id = ?");
+                            "WHERE project_uid = ? AND pat_id = ? AND judger_id = ?");
             checkExists.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
             checkExists.setString(2, patId);
             checkExists.setString(3, userIdForAuth(authentication));
@@ -196,4 +302,21 @@ public class JDBCBackedStorage {
     private String userIdForAuth(Authentication auth) {
         return auth.getName().toUpperCase(Locale.ROOT); // TODO
     }
+
+
+    private boolean checkUserAuthority(Connection conn, UUID projectUID, Authentication authentication, ProjectAuthorityGrant minGrant) throws SQLException {
+        PreparedStatement ps = conn.prepareStatement("SELECT grant_type FROM cat.project_role_grants WHERE project_uid = ? AND user_uid = ?");
+        ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
+        ps.setString(2, userIdForAuth(authentication));
+        ResultSet rs = ps.executeQuery();
+        while (rs.next()) {
+            // pos/0 indicates match or greater (enum index comes at or before minGrant)
+            if (minGrant.compareTo(ProjectAuthorityGrant.valueOf(rs.getString("grant_type"))) >= 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
 }
