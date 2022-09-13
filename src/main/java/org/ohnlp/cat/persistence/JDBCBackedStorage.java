@@ -5,7 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mchange.v2.c3p0.ComboPooledDataSource;
 import org.ohnlp.cat.ApplicationConfiguration;
 import org.ohnlp.cat.dto.*;
-import org.ohnlp.cat.dto.enums.CohortInclusion;
+import org.ohnlp.cat.dto.enums.PatientJudgementState;
+import org.ohnlp.cat.dto.enums.NodeMatchState;
 import org.ohnlp.cat.dto.enums.ProjectAuthorityGrant;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
@@ -14,10 +15,7 @@ import org.springframework.stereotype.Component;
 import java.beans.PropertyVetoException;
 import java.io.IOException;
 import java.sql.*;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-import java.util.UUID;
+import java.util.*;
 
 // TODO permissions checks for all functions?
 @Component
@@ -192,88 +190,289 @@ public class JDBCBackedStorage {
 
     // ===== Cohort Related Methods ===== //
     // Gets the current evaluated cohort for a given project/user. TODO consider adding pagination in returned results (sort by score)
-    public List<PatInfoDTO> getRetrievedCohort(Authentication authentication, UUID projectUID) throws IOException {
+    public List<PatInfoDTO> getRetrievedCohort(Authentication authentication, UUID jobUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
-            PreparedStatement ps = conn.prepareStatement(
-                    "SELECT c.pat_id, c.pat_name, c.pat_dob, c.pat_birth_gender_male_flag, j.judgement " +
-                            "FROM cat.cohorts c LEFT JOIN (SELECT * FROM cat.judgements WHERE judger_id = ?) j" +
-                            "     ON c.project_uid = j.project_uid AND c.pat_id = j.pat_id " +
-                            "WHERE c.project_uid = ? ORDER BY c.score DESC");
-            ps.setString(1, userIdForAuth(authentication));
-            ps.setString(2, projectUID.toString().toUpperCase(Locale.ROOT));
-            List<PatInfoDTO> ret = new ArrayList<>();
-            ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                PatInfoDTO next = new PatInfoDTO();
-                next.setPat_id(rs.getString("pat_id"));
-                next.setName(rs.getString("pat_name"));
-                next.setDob(rs.getDate("pat_dob"));
-                next.setBirth_gender_male_flag(rs.getBoolean("pat_birth_gender_male_flag"));
-                String jgmt = rs.getString("judgement");
-                if (jgmt != null) {
-                    next.setInclusion(CohortInclusion.valueOf(jgmt.toUpperCase(Locale.ROOT)));
-                } else {
-                    next.setInclusion(CohortInclusion.UNJUDGED);
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT c.patient_uid, c.score, j.judgement " +
+                                "FROM (SELECT * FROM cat.COHORT WHERE job_uid = ?) c LEFT JOIN (SELECT * FROM cat.COHORT_RELEVANCE WHERE judger_uid = ?) j" +
+                                "     ON c.row_uid = j.cohort_row_uid ORDER BY c.score DESC");
+                ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                ps.setString(2, userIdForAuth(authentication));
+                List<PatInfoDTO> ret = new ArrayList<>();
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    PatInfoDTO next = new PatInfoDTO();
+                    next.setPat_id(rs.getString("patient_uid"));
+                    String jgmt = rs.getString("judgement");
+                    if (jgmt != null) {
+                        next.setInclusion(PatientJudgementState.valueOf(jgmt.toUpperCase(Locale.ROOT)));
+                    } else {
+                        next.setInclusion(PatientJudgementState.UNJUDGED);
+                    }
+                    ret.add(next);
                 }
-                ret.add(next);
+                return ret;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.READ.name());
             }
-            return ret;
-        } catch (SQLException e) {
+        } catch (Throwable e) {
             e.printStackTrace(); // TODO log exceptions to DB
             throw new IOException("Error on cohort search result retrieval", e);
         }
     }
 
-    public void writeCohortJudgement(Authentication authentication, UUID projectUID,
-                                     String patId, CohortInclusion inclusion) throws IOException {
+    public Map<String, PatientJudgementState> getCohortRelevance(Authentication authentication, UUID jobUID, String... patientUIDs) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
-            // Manually check exists instead of using MERGE because not all SQL dialects support it
-            PreparedStatement checkExists = conn.prepareStatement(
-                    "SELECT pat_id FROM cat.judgements " +
-                            "WHERE project_uid = ? AND pat_id = ? AND judger_id = ?");
-            checkExists.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
-            checkExists.setString(2, patId);
-            checkExists.setString(3, userIdForAuth(authentication));
-            if (checkExists.executeQuery().next()) {
-                PreparedStatement ps = conn.prepareStatement(
-                        "UPDATE cat.judgements " +
-                                "SET judgement = ? " +
-                                "WHERE project_uid = ? AND pat_id = ? AND judger_id = ?");
-                ps.setString(1, inclusion.name());
-                ps.setString(2, projectUID.toString().toUpperCase(Locale.ROOT));
-                ps.setString(3, patId);
-                ps.setString(4, userIdForAuth(authentication));
-                ps.execute();
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
+                Map<String, PatientJudgementState> ret = new HashMap<>();
+                PreparedStatement ps = conn.prepareStatement("SELECT judgement " +
+                        "FROM cat.COHORT c " +
+                        "JOIN cat.COHORT_RELEVANCE cr ON c.row_uid = cr.cohort_row_uid " +
+                        "WHERE c.job_uid = ? AND c.patient_uid = ? AND cr.judger_uid = ?");
+                for (String patientUID : patientUIDs) { // Do one-by-one search because not all JDBC drivers support IN clauses...
+                    ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                    ps.setString(2, patientUID);
+                    ps.setString(3, userIdForAuth(authentication));
+                    ResultSet rs = ps.executeQuery();
+                    if (rs.next()) {
+                        ret.put(patientUID, PatientJudgementState.valueOf(rs.getString("judgement")));
+                    } else {
+                        ret.put(patientUID, PatientJudgementState.UNJUDGED);
+                    }
+                }
+                return ret;
             } else {
-                PreparedStatement ps = conn.prepareStatement(
-                        "INSERT INTO cat.judgements (project_uid, pat_id, judger_id, judgement) VALUES (?, ?, ?, ?)");
-                ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
-                ps.setString(2, patId);
-                ps.setString(3, userIdForAuth(authentication));
-                ps.setString(4, inclusion.name());
-                ps.execute();
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.READ.name());
             }
-        } catch (SQLException e) {
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on cohort judgement retrieval", e);
+        }
+    }
+
+    public boolean writeCohortJudgement(Authentication authentication, UUID jobUID,
+                                     String patId, PatientJudgementState inclusion) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
+                // Manually check exists instead of using MERGE because not all SQL dialects support it
+                PreparedStatement checkExists = conn.prepareStatement(
+                        "SELECT c.row_id, cr.row_id AS JUDGEMENT_ROW, cr.judgement FROM cat.COHORT c LEFT JOIN cat.COHORT_RELEVANCE cr ON c.row_id = cr.cohort_row_uid " +
+                                "WHERE c.job_uid = ? AND c.patient_uid = ? AND cr.judger_uid = ?");
+                checkExists.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                checkExists.setString(2, patId);
+                checkExists.setString(3, userIdForAuth(authentication));
+                ResultSet rs = checkExists.executeQuery();
+                if (rs.next()) {
+                    long rowUID = rs.getLong("row_id");
+                    if (rs.getString("judgement") != null) { // preexisting relevance
+                        PreparedStatement ps = conn.prepareStatement(
+                                "UPDATE cat.COHORT_RELEVANCE " +
+                                        "SET judgement = ? " +
+                                        "WHERE row_uid = ?");
+                        ps.setString(1, inclusion.name());
+                        ps.setLong(2, rs.getLong("JUDGEMENT_ROW"));
+                        return ps.executeUpdate() > 0;
+                    } else {
+                        PreparedStatement ps = conn.prepareStatement(
+                                "INSERT INTO cat.COHORT_RELEVANCE (cohort_row_uid, judger_uid, judgement) VALUES (?, ?, ?)");
+                        ps.setLong(1, rowUID);
+                        ps.setString(2, userIdForAuth(authentication));
+                        ps.setString(3, inclusion.name());
+                        return ps.executeUpdate() > 0;
+                    }
+                } else {
+                    throw new IllegalStateException("Attempted to create judgement on patient " + patId + " that does not exist in cohort for job " + jobUID);
+                }
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.JUDGE.name());
+            }
+        } catch (Throwable e) {
             e.printStackTrace(); // TODO log exceptions to DB
             throw new IOException("Error on cohort judgement write", e);
         }
     }
 
-    public List<StructuredEvidenceDTO> getStructuredEvidenceForProject(Authentication authentication, UUID projectUID) throws IOException {
+    public Map<String, NodeMatchState> getCriterionMatchStatus(Authentication authentication, UUID jobUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
-            // Manually check exists instead of using MERGE because not all SQL dialects support it
-            PreparedStatement ps = conn.prepareStatement(
-                    "SELECT evidence_uid, evidence_item FROM cat.structured_evidence se JOIN ");
-            return null; //TODO
-        } catch (SQLException e) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT pc.criterion " +
+                                "FROM AUDIT_LOG al " +
+                                "JOIN PROJECT_CRITERION pc ON al.criterion_uid = pc.row_uid " +
+                                "WHERE al.job_uid = ?"
+                );
+                ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                ResultSet rs = ps.executeQuery();
+                CriterionDefinitionDTO def;
+                if (rs.next()) {
+                    def = om.get().readValue(rs.getString("criterion"), CriterionDefinitionDTO.class);
+                } else {
+                    throw new IllegalStateException("No definition stored for job");
+                }
+                Set<String> nodeUIDs = new HashSet<>();
+                recursSearchNodeUIDsFromDef(def, nodeUIDs);
+                Map<String, NodeMatchState> judgements = new HashMap<>();
+                nodeUIDs.forEach(node_uid -> {
+                    try {
+                        PreparedStatement evidenceRetrieval = conn.prepareStatement(
+                                "SELECT DISTINCT e.evidence_uid, e.nlp_flag, er.judgement FROM cat.EVIDENCE e " +
+                                        "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid " +
+                                        "WHERE e.job_uid = ? AND e.criterion_uid = ? AND er.judger_uid = ?");
+                        evidenceRetrieval.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                        evidenceRetrieval.setString(2, node_uid.toUpperCase(Locale.ROOT));
+                        evidenceRetrieval.setString(3, userIdForAuth(authentication));
+                        ResultSet rs2 = evidenceRetrieval.executeQuery();
+                        boolean found = false;
+                        boolean nonNLPFound = false;
+                        NodeMatchState evidenceJudgement = NodeMatchState.NO_EVIDENCE_FOUND;
+                        // First, determine if there is a user judgement overriding default algorithmic matches
+                        while (rs2.next()) {
+                            found = true;
+                            if (!rs.getBoolean("nlp_flag")) {
+                                nonNLPFound = true;
+                            }
+                            String judgement = rs.getString("judgement");
+                            if (judgement != null) {
+                                NodeMatchState parsedJudgement = NodeMatchState.valueOf(judgement);
+                                if (evidenceJudgement.compareTo(parsedJudgement) > 0) { // Lower priority than the parsed judgement
+                                    evidenceJudgement = parsedJudgement;
+                                }
+                            }
+                        }
+                        // Now adjust if there are no user judgements but there is evidence
+                        if (found && (evidenceJudgement.equals(NodeMatchState.NO_EVIDENCE_FOUND))) {
+                            if (!nonNLPFound) {
+                                evidenceJudgement = NodeMatchState.EVIDENCE_FOUND;
+                            } else {
+                                evidenceJudgement = NodeMatchState.EVIDENCE_FOUND_NLP;
+                            }
+                        }
+                        rs2.close();
+                        judgements.put(node_uid, evidenceJudgement);
+                    } catch (SQLException e) {
+                        throw new RuntimeException("Error retrieving evidence judgement states", e);
+                    }
+                });
+                return judgements;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.READ.name());
+            }
+        } catch (Throwable e) {
             e.printStackTrace(); // TODO log exceptions to DB
-            throw new IOException("Error on Structured evidence retrieval", e);
+            throw new IOException("Error on current criterion status retrieval", e);
         }
     }
 
-    public List<StructuredEvidenceDTO> getStructuredEvidenceForProjectCohortDefinitionNode(
-            Authentication authentication, UUID projectUID, UUID nodeUID) {
-        return null; // TODO
+    private void recursSearchNodeUIDsFromDef(CriterionDefinitionDTO def, Set<String> nodeUIDs) {
+        if (def.getEntity() != null) {
+            nodeUIDs.add(def.getNode_id().toString());
+        } else {
+            for (CriterionDefinitionDTO child : def.getChildren()) {
+                recursSearchNodeUIDsFromDef(child, nodeUIDs);
+            }
+        }
+    }
+
+    // ===== Evidence Related Methods ===== //
+
+    public Map<String, NodeMatchState> getEvidenceRelevance(Authentication authentication, UUID jobUID, UUID nodeUID, String... evidenceUIDs) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
+                Map<String, NodeMatchState> ret = new HashMap<>();
+                PreparedStatement ps = conn.prepareStatement("SELECT er.judgement " +
+                        "FROM cat.EVIDENCE e " +
+                        "JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid " +
+                        "WHERE e.job_uid = ? AND e.evidence_uid = ? AND e.node_uid = ? AND er.judger_uid = ?");
+                for (String evidenceUID : evidenceUIDs) { // Do one-by-one search because not all JDBC drivers support IN clauses...
+                    ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                    ps.setString(2, evidenceUID);
+                    ps.setString(3, nodeUID.toString().toUpperCase(Locale.ROOT));
+                    ps.setString(4, userIdForAuth(authentication));
+                    ResultSet rs = ps.executeQuery();
+                    if (rs.next()) {
+                        ret.put(evidenceUID, NodeMatchState.valueOf(rs.getString("judgement")));
+                    } else {
+                        ret.put(evidenceUID, NodeMatchState.UNJUDGED);
+                    }
+                }
+                return ret;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.READ.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on evidence judgement retrieval", e);
+        }
+    }
+
+    public Boolean writeEvidenceJudgement(Authentication authentication, UUID jobUID, UUID nodeUID, String evidenceUID, NodeMatchState judgement) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
+                // Manually check exists instead of using MERGE because not all SQL dialects support it
+                PreparedStatement checkExists = conn.prepareStatement(
+                        "SELECT e.row_id, er.row_id AS JUDGEMENT_ROW, er.judgement FROM cat.EVIDENCE e LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_id = er.evidence_row_uid " +
+                                "WHERE e.job_uid = ? AND e.node_uid = ? AND e.evidence_uid = ? AND er.judger_uid = ?"); // TODO make sure er.judger_uid left join behaviour is as expected here and in updating cohort inclusion
+                checkExists.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                checkExists.setString(2, nodeUID.toString().toUpperCase(Locale.ROOT));
+                checkExists.setString(3, evidenceUID);
+                checkExists.setString(4, userIdForAuth(authentication));
+                ResultSet rs = checkExists.executeQuery();
+                if (rs.next()) {
+                    long rowUID = rs.getLong("row_id");
+                    if (rs.getString("judgement") != null) { // preexisting relevance
+                        PreparedStatement ps = conn.prepareStatement(
+                                "UPDATE cat.EVIDENCE_RELEVANCE " +
+                                        "SET judgement = ? " +
+                                        "WHERE row_uid = ?");
+                        ps.setString(1, judgement.name());
+                        ps.setLong(2, rs.getLong("JUDGEMENT_ROW"));
+                        return ps.executeUpdate() > 0;
+                    } else {
+                        PreparedStatement ps = conn.prepareStatement(
+                                "INSERT INTO cat.EVIDENCE_RELEVANCE (evidence_row_uid, judger_uid, judgement) VALUES (?, ?, ?)");
+                        ps.setLong(1, rowUID);
+                        ps.setString(2, userIdForAuth(authentication));
+                        ps.setString(3, judgement.name());
+                        return ps.executeUpdate() > 0;
+                    }
+                } else {
+                    throw new IllegalStateException("Attempted to create judgement on evidence " + evidenceUID + " that does not exist in job " + jobUID + " and node " + nodeUID);
+                }
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.JUDGE.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on evidence judgement write", e);
+        }
+    }
+
+    public List<EvidenceDTO> getEvidenceForNode(
+            Authentication authentication, UUID jobUID, UUID nodeUID, String personUID) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT evidence_uid, score FROM cat.EVIDENCE WHERE job_uid = ? AND node_uid = ? AND person_uid = ? ORDER BY score DESC");
+                ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                ps.setString(2, nodeUID.toString().toUpperCase(Locale.ROOT));
+                ps.setString(3, personUID);
+                ResultSet rs = ps.executeQuery();
+                List<EvidenceDTO> ret = new ArrayList<>();
+                while (rs.next()) {
+                    EvidenceDTO evidence = new EvidenceDTO();
+                    evidence.setEvidenceUID(rs.getString("evidence_uid"));
+                    evidence.setScore(rs.getDouble("score"));
+                    ret.add(evidence);
+                }
+                return ret;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.READ.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on Structured evidence retrieval", e);
+        }
     }
 
 
@@ -318,5 +517,18 @@ public class JDBCBackedStorage {
         return false;
     }
 
-
+    private UUID getProjectUIDForJob(Connection conn, UUID jobUID) throws SQLException {
+        PreparedStatement ps = conn.prepareStatement(
+                "SELECT al.project_uid " +
+                        "FROM cat.AUDIT_LOG al " +
+                        "WHERE al.job_uid = ?"
+        );
+        ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+        ResultSet rs = ps.executeQuery();
+        if (rs.next()) {
+            return UUID.fromString(rs.getString(1));
+        } else {
+            throw new IllegalArgumentException("JOB ID " + jobUID + " caused error on project UID resolution");
+        }
+    }
 }

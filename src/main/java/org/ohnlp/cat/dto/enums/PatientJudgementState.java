@@ -1,6 +1,6 @@
 package org.ohnlp.cat.dto.enums;
 
-public enum CohortInclusion {
+public enum PatientJudgementState {
     UNJUDGED,
     INCLUDE,
     EXCLUDE
