@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mchange.v2.c3p0.ComboPooledDataSource;
 import org.ohnlp.cat.ApplicationConfiguration;
 import org.ohnlp.cat.dto.*;
+import org.ohnlp.cat.dto.enums.JobStatus;
 import org.ohnlp.cat.dto.enums.PatientJudgementState;
 import org.ohnlp.cat.dto.enums.NodeMatchState;
 import org.ohnlp.cat.dto.enums.ProjectAuthorityGrant;
@@ -16,6 +17,7 @@ import java.beans.PropertyVetoException;
 import java.io.IOException;
 import java.sql.*;
 import java.util.*;
+import java.util.Date;
 
 // TODO permissions checks for all functions?
 @Component
@@ -475,6 +477,49 @@ public class JDBCBackedStorage {
         }
     }
 
+    // ===== Job Related Methods =====/
+
+    public JobInfoDTO createJobRecord(Authentication authentication, UUID projectUID) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.EXECUTE)) {
+                // Use Current/Latest criterion by date
+                PreparedStatement ps = conn.prepareStatement("SELECT row_uid, criterion FROM cat.PROJECT_CRITERION p WHERE project_uid = ? ORDER BY revision_date DESC");
+                ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
+                ResultSet rs = ps.executeQuery();
+                long criterionRowID;
+                if (rs.next()) {
+                    criterionRowID = rs.getLong("row_uid");
+                } else {
+                    throw new IllegalArgumentException("Project " + projectUID + " has no active criterion stored");
+                }
+                rs.close();
+                UUID jobUID = UUID.randomUUID();
+                long jobTimestamp = System.currentTimeMillis();
+                ps = conn.prepareStatement("INSERT INTO cat.AUDIT_LOG (project_uid, job_uid, criterion_uid, user_uid, start_date, job_status) VALUES (?, ?, ?, ?, ?, ?)");
+                ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
+                ps.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
+                ps.setLong(3, criterionRowID);
+                ps.setString(4, userIdForAuth(authentication));
+                ps.setTimestamp(5, new Timestamp(jobTimestamp));
+                ps.setInt(6, JobStatus.QUEUED.getCode());
+                if (ps.executeUpdate() < 1) {
+                    throw new IOException("No rows updated in audit log for job creation");
+                }
+                JobInfoDTO ret = new JobInfoDTO();
+                ret.setJob_uid(jobUID);
+                ret.setProject_uid(projectUID);
+                ret.setStartDate(new Date(jobTimestamp));
+                ret.setStatus(JobStatus.QUEUED);
+                return ret;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.EXECUTE.name());
+            }
+
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on job creation", e);
+        }
+    }
 
     // ===== Utility/Service/Non-Returning Methods =====/
 
