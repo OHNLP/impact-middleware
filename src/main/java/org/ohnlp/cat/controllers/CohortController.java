@@ -38,7 +38,7 @@ public class CohortController {
         }
     }
 
-    @GetMapping("/evidence")
+    @GetMapping("/node_evidence")
     public @ResponseBody
     List<EvidenceDTO> getEvidenceForNode(Authentication authentication,
                                          @RequestParam(name = "job_uid") String jobUID,
@@ -93,7 +93,7 @@ public class CohortController {
         }
     }
 
-    @GetMapping("/evidence")
+    @GetMapping("/node_matchstates")
     public @ResponseBody
     Map<String, NodeMatchState> getEvidenceRelevance(Authentication authentication,
                                                      @RequestParam(name = "job_uid") String jobUID,
