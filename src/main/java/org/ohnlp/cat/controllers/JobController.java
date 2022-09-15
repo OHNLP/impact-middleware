@@ -21,7 +21,8 @@ public class JobController {
         this.storage = storage;
     }
 
-    @GetMapping("/")
+    @GetMapping("/user")
+    public @ResponseBody
     List<JobInfoDTO> getJobsForUser(Authentication authentication) {
         try {
             return storage.getJobsForUser(authentication);
@@ -31,7 +32,8 @@ public class JobController {
         }
     }
 
-    @GetMapping("/for_project")
+    @GetMapping("/project")
+    public @ResponseBody
     List<JobInfoDTO> getJobsByProject(Authentication authentication, @RequestParam("project_uid") UUID projectUID) {
         try {
             return storage.getJobsForProject(authentication, projectUID);
