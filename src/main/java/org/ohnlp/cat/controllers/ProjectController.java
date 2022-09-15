@@ -47,9 +47,9 @@ public class ProjectController {
 
     @PostMapping("/rename")
     public @ResponseBody
-    ProjectDTO renameProject(Authentication authentication, @RequestParam(name="name") String projectName, @RequestParam(name="uid") String uid) {
+    ProjectDTO renameProject(Authentication authentication, @RequestParam(name="project_name") String projectName, @RequestParam(name="project_uid") UUID uid) {
         try {
-            return storage.renameProject(authentication, UUID.fromString(uid), projectName);
+            return storage.renameProject(authentication, uid, projectName);
         } catch (Throwable e) {
             // TODO log the IOException
             throw new RuntimeException("Error occurred on project rename");
@@ -69,9 +69,9 @@ public class ProjectController {
 
     @DeleteMapping("/archive")
     public @ResponseBody
-    Boolean archiveProject(Authentication authentication, @RequestParam(name="uid") String uid) {
+    Boolean archiveProject(Authentication authentication, @RequestParam(name="project_uid") UUID uid) {
         try {
-            return storage.archiveProject(authentication, UUID.fromString(uid));
+            return storage.archiveProject(authentication, uid);
         } catch (Throwable e) {
             // TODO log the IOException
             throw new RuntimeException("Error occurred on project rename");
@@ -80,9 +80,9 @@ public class ProjectController {
 
     @GetMapping("/criterion")
     public @ResponseBody
-    CriterionDefinitionDTO getProjectCriterion(Authentication authentication, @RequestParam(name="uid") String uid) {
+    CriterionDefinitionDTO getProjectCriterion(Authentication authentication, @RequestParam(name="project_uid") UUID uid) {
         try {
-            return storage.getProjectCriterion(authentication, UUID.fromString(uid));
+            return storage.getProjectCriterion(authentication, uid);
         } catch (Throwable e) {
             // TODO log the IOException
             throw new RuntimeException("Error occurred on project rename");
@@ -91,9 +91,9 @@ public class ProjectController {
 
     @PostMapping("/criterion")
     public @ResponseBody
-    Boolean writeProjectCriterion(Authentication authentication, @RequestParam(name="uid") String uid, @RequestBody CriterionDefinitionDTO criterion) {
+    Boolean writeProjectCriterion(Authentication authentication, @RequestParam(name="project_uid") UUID uid, @RequestBody CriterionDefinitionDTO criterion) {
         try {
-            return storage.writeProjectCriterion(authentication, UUID.fromString(uid), criterion);
+            return storage.writeProjectCriterion(authentication, uid, criterion);
         } catch (Throwable e) {
             // TODO log the IOException
             throw new RuntimeException("Error occurred on project rename");

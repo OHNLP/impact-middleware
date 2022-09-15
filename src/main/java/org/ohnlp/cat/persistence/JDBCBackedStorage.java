@@ -7,7 +7,7 @@ import org.ohnlp.cat.ApplicationConfiguration;
 import org.ohnlp.cat.dto.*;
 import org.ohnlp.cat.dto.enums.JobStatus;
 import org.ohnlp.cat.dto.enums.PatientJudgementState;
-import org.ohnlp.cat.dto.enums.NodeMatchState;
+import org.ohnlp.cat.dto.enums.JudgementState;
 import org.ohnlp.cat.dto.enums.ProjectAuthorityGrant;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
@@ -259,11 +259,12 @@ public class JDBCBackedStorage {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
                 // Manually check exists instead of using MERGE because not all SQL dialects support it
                 PreparedStatement checkExists = conn.prepareStatement(
-                        "SELECT c.row_id, cr.row_id AS JUDGEMENT_ROW, cr.judgement FROM cat.COHORT c LEFT JOIN cat.COHORT_RELEVANCE cr ON c.row_id = cr.cohort_row_uid " +
-                                "WHERE c.job_uid = ? AND c.patient_uid = ? AND cr.judger_uid = ?");
-                checkExists.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
-                checkExists.setString(2, patId);
-                checkExists.setString(3, userIdForAuth(authentication));
+                        "SELECT c.row_id, cr.row_id AS JUDGEMENT_ROW, cr.judgement FROM cat.COHORT c " +
+                                "LEFT JOIN cat.COHORT_RELEVANCE cr ON c.row_id = cr.cohort_row_uid AND cr.judger_uid = ?" +
+                                "WHERE c.job_uid = ? AND c.patient_uid = ?");
+                checkExists.setString(1, userIdForAuth(authentication));
+                checkExists.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
+                checkExists.setString(3, patId);
                 ResultSet rs = checkExists.executeQuery();
                 if (rs.next()) {
                     long rowUID = rs.getLong("row_id");
@@ -295,7 +296,7 @@ public class JDBCBackedStorage {
         }
     }
 
-    public Map<String, NodeMatchState> getCriterionMatchStatus(Authentication authentication, UUID jobUID) throws IOException {
+    public Map<String, JudgementDTO> getCriterionMatchStatus(Authentication authentication, UUID jobUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
                 PreparedStatement ps = conn.prepareStatement(
@@ -314,20 +315,40 @@ public class JDBCBackedStorage {
                 }
                 Set<String> nodeUIDs = new HashSet<>();
                 recursSearchNodeUIDsFromDef(def, nodeUIDs);
-                Map<String, NodeMatchState> judgements = new HashMap<>();
+                Map<String, JudgementDTO> judgements = new HashMap<>();
                 nodeUIDs.forEach(node_uid -> {
                     try {
+                        JudgementDTO nodeJudgement = new JudgementDTO();
+                        // Check for a node-level judgement first. If there is one, override everything
+                        PreparedStatement nodeRetrieval = conn.prepareStatement(
+                                "SELECT nr.judgement, nr.comment FROM NODE_RELEVANCE nr WHERE nr.job_uid = ? AND nr.judger_uid = ? AND AND nr.node_uid = ?");
+                        nodeRetrieval.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                        nodeRetrieval.setString(2, userIdForAuth(authentication));
+                        nodeRetrieval.setString(3, node_uid.toUpperCase(Locale.ROOT));
+                        ResultSet rs2 = nodeRetrieval.executeQuery();
+                        if (rs2.next()) {
+                            String judgement = rs2.getString("judgement");
+                            if (judgement != null) {
+                                nodeJudgement.setJudgement(JudgementState.valueOf(judgement));
+                            }
+                            nodeJudgement.setComment(rs2.getString("comment"));
+                        }
+                        rs2.close();
+                        if (nodeJudgement.getJudgement() != null) {
+                            judgements.put(node_uid, nodeJudgement);
+                        }
                         PreparedStatement evidenceRetrieval = conn.prepareStatement(
                                 "SELECT DISTINCT e.evidence_uid, e.nlp_flag, er.judgement FROM cat.EVIDENCE e " +
-                                        "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid " +
-                                        "WHERE e.job_uid = ? AND e.criterion_uid = ? AND er.judger_uid = ?");
-                        evidenceRetrieval.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
-                        evidenceRetrieval.setString(2, node_uid.toUpperCase(Locale.ROOT));
-                        evidenceRetrieval.setString(3, userIdForAuth(authentication));
-                        ResultSet rs2 = evidenceRetrieval.executeQuery();
+                                        "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.node_uid = er.node_uid AND er.judger_uid = ?" +
+                                        "WHERE e.job_uid = ? AND e.criterion_uid = ?");
+                        evidenceRetrieval.setString(1, userIdForAuth(authentication));
+                        evidenceRetrieval.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
+                        evidenceRetrieval.setString(3, node_uid.toUpperCase(Locale.ROOT));
+
+                        rs2 = evidenceRetrieval.executeQuery();
                         boolean found = false;
                         boolean nonNLPFound = false;
-                        NodeMatchState evidenceJudgement = NodeMatchState.NO_EVIDENCE_FOUND;
+                        JudgementState evidenceJudgementState = JudgementState.NO_EVIDENCE_FOUND;
                         // First, determine if there is a user judgement overriding default algorithmic matches
                         while (rs2.next()) {
                             found = true;
@@ -336,22 +357,23 @@ public class JDBCBackedStorage {
                             }
                             String judgement = rs.getString("judgement");
                             if (judgement != null) {
-                                NodeMatchState parsedJudgement = NodeMatchState.valueOf(judgement);
-                                if (evidenceJudgement.compareTo(parsedJudgement) > 0) { // Lower priority than the parsed judgement
-                                    evidenceJudgement = parsedJudgement;
+                                JudgementState parsedJudgement = JudgementState.valueOf(judgement);
+                                if (evidenceJudgementState.compareTo(parsedJudgement) > 0) { // Lower priority than the parsed judgement
+                                    evidenceJudgementState = parsedJudgement;
                                 }
                             }
                         }
                         // Now adjust if there are no user judgements but there is evidence
-                        if (found && (evidenceJudgement.equals(NodeMatchState.NO_EVIDENCE_FOUND))) {
+                        if (found && (evidenceJudgementState.equals(JudgementState.NO_EVIDENCE_FOUND))) {
                             if (!nonNLPFound) {
-                                evidenceJudgement = NodeMatchState.EVIDENCE_FOUND;
+                                evidenceJudgementState = JudgementState.EVIDENCE_FOUND;
                             } else {
-                                evidenceJudgement = NodeMatchState.EVIDENCE_FOUND_NLP;
+                                evidenceJudgementState = JudgementState.EVIDENCE_FOUND_NLP;
                             }
                         }
                         rs2.close();
-                        judgements.put(node_uid, evidenceJudgement);
+                        nodeJudgement.setJudgement(evidenceJudgementState);
+                        judgements.put(node_uid, nodeJudgement);
                     } catch (SQLException e) {
                         throw new RuntimeException("Error retrieving evidence judgement states", e);
                     }
@@ -376,12 +398,39 @@ public class JDBCBackedStorage {
         }
     }
 
+
+    public Map<String, JudgementDTO> setCriterionMatchStatus(Authentication authentication, UUID jobUID, UUID nodeUID, JudgementDTO judgement) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
+                PreparedStatement ps = conn.prepareStatement("UPDATE cat.NODE_RELEVANCE SET judgement = ?, comment = ? WHERE node_uid = ? AND judger_uid = ?");
+                ps.setString(1, judgement.getJudgement() == null ? null : judgement.getJudgement().name());
+                ps.setString(2, judgement.getComment());
+                ps.setString(3, nodeUID.toString().toUpperCase(Locale.ROOT));
+                ps.setString(4, userIdForAuth(authentication));
+                if (ps.executeUpdate() == 0) { // No preexisting row
+                    ps = conn.prepareStatement("INSERT INTO cat.NODE_RELEVANCE (node_uid, judger_uid, judgement, comment) VALUES (?, ?, ?, ?)");
+                    ps.setString(1, nodeUID.toString().toUpperCase(Locale.ROOT));
+                    ps.setString(2, userIdForAuth(authentication));
+                    ps.setString(3, judgement.getJudgement() == null ? null : judgement.getJudgement().name());
+                    ps.setString(4, judgement.getComment());
+                    ps.executeUpdate();
+                }
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.JUDGE.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on current criterion status write", e);
+        }
+        return getCriterionMatchStatus(authentication, jobUID);
+    }
+
     // ===== Evidence Related Methods ===== //
 
-    public Map<String, NodeMatchState> getEvidenceRelevance(Authentication authentication, UUID jobUID, UUID nodeUID, String... evidenceUIDs) throws IOException {
+    public Map<String, JudgementState> getEvidenceRelevance(Authentication authentication, UUID jobUID, UUID nodeUID, String... evidenceUIDs) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
-                Map<String, NodeMatchState> ret = new HashMap<>();
+                Map<String, JudgementState> ret = new HashMap<>();
                 PreparedStatement ps = conn.prepareStatement("SELECT er.judgement " +
                         "FROM cat.EVIDENCE e " +
                         "JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid " +
@@ -393,9 +442,9 @@ public class JDBCBackedStorage {
                     ps.setString(4, userIdForAuth(authentication));
                     ResultSet rs = ps.executeQuery();
                     if (rs.next()) {
-                        ret.put(evidenceUID, NodeMatchState.valueOf(rs.getString("judgement")));
+                        ret.put(evidenceUID, JudgementState.valueOf(rs.getString("judgement")));
                     } else {
-                        ret.put(evidenceUID, NodeMatchState.UNJUDGED);
+                        ret.put(evidenceUID, JudgementState.UNJUDGED);
                     }
                 }
                 return ret;
@@ -408,17 +457,18 @@ public class JDBCBackedStorage {
         }
     }
 
-    public Boolean writeEvidenceJudgement(Authentication authentication, UUID jobUID, UUID nodeUID, String evidenceUID, NodeMatchState judgement) throws IOException {
+    public Boolean writeEvidenceJudgement(Authentication authentication, UUID jobUID, UUID nodeUID, String evidenceUID, JudgementState judgement) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
                 // Manually check exists instead of using MERGE because not all SQL dialects support it
                 PreparedStatement checkExists = conn.prepareStatement(
-                        "SELECT e.row_id, er.row_id AS JUDGEMENT_ROW, er.judgement FROM cat.EVIDENCE e LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_id = er.evidence_row_uid " +
-                                "WHERE e.job_uid = ? AND e.node_uid = ? AND e.evidence_uid = ? AND er.judger_uid = ?"); // TODO make sure er.judger_uid left join behaviour is as expected here and in updating cohort inclusion
-                checkExists.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
-                checkExists.setString(2, nodeUID.toString().toUpperCase(Locale.ROOT));
-                checkExists.setString(3, evidenceUID);
-                checkExists.setString(4, userIdForAuth(authentication));
+                        "SELECT e.row_id, er.row_id AS JUDGEMENT_ROW, er.judgement FROM cat.EVIDENCE e " +
+                                "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_id = er.evidence_row_uid AND er.judger_uid = ?" +
+                                "WHERE e.job_uid = ? AND e.node_uid = ? AND e.evidence_uid = ? ");
+                checkExists.setString(1, userIdForAuth(authentication));
+                checkExists.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
+                checkExists.setString(3, nodeUID.toString().toUpperCase(Locale.ROOT));
+                checkExists.setString(4, evidenceUID);
                 ResultSet rs = checkExists.executeQuery();
                 if (rs.next()) {
                     long rowUID = rs.getLong("row_id");

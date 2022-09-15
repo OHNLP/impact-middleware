@@ -1,6 +1,6 @@
 package org.ohnlp.cat.dto.enums;
 
-public enum NodeMatchState {
+public enum JudgementState {
     JUDGED_MATCH,
     JUDGED_MISMATCH,
     EVIDENCE_FOUND,
