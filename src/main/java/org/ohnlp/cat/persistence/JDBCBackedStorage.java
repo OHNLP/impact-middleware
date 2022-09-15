@@ -529,6 +529,57 @@ public class JDBCBackedStorage {
 
     // ===== Job Related Methods =====/
 
+    public List<JobInfoDTO> getJobsForUser(Authentication authentication) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            // No need to check user authority to read own jobs
+            List<JobInfoDTO> ret = new ArrayList<>();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT job_uid, project_uid, start_date, user_uid, job_status FROM cat.AUDIT_LOG WHERE user_uid = ? AND archived = 0 ORDER BY start_date DESC");
+                ps.setString(1, userIdForAuth(authentication));
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    JobInfoDTO info = new JobInfoDTO();
+                    info.setProject_uid(UUID.fromString(rs.getString("project_uid")));
+                    info.setStartDate(rs.getTimestamp("start_date"));
+                    info.setStatus(JobStatus.forCode(rs.getInt("job_status")));
+                    info.setJob_uid(UUID.fromString(rs.getString("job_uid")));
+                    ret.add(info);
+                }
+                return ret;
+
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on job retrieval", e);
+        }
+    }
+
+    public List<JobInfoDTO> getJobsForProject(Authentication authentication, UUID projectUID) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            List<JobInfoDTO> ret = new ArrayList<>();
+            if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.READ)) {
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT job_uid, start_date, user_uid, job_status FROM cat.AUDIT_LOG WHERE project_uid = ? AND archived = 0 ORDER BY start_date DESC");
+                ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    JobInfoDTO info = new JobInfoDTO();
+                    info.setProject_uid(projectUID);
+                    info.setStartDate(rs.getTimestamp("start_date"));
+                    info.setStatus(JobStatus.forCode(rs.getInt("job_status")));
+                    info.setJob_uid(UUID.fromString(rs.getString("job_uid")));
+                    ret.add(info);
+                }
+                return ret;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.READ.name());
+            }
+
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on job retrieval", e);
+        }
+    }
+
     public JobInfoDTO createJobRecord(Authentication authentication, UUID projectUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.EXECUTE)) {
@@ -568,6 +619,36 @@ public class JDBCBackedStorage {
         } catch (Throwable e) {
             e.printStackTrace(); // TODO log exceptions to DB
             throw new IOException("Error on job creation", e);
+        }
+    }
+
+    public boolean cancelJobRecord(Authentication authentication, UUID jobUID) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.EXECUTE)) {
+                PreparedStatement ps = conn.prepareStatement("UPDATE AUDIT_LOG SET job_status = -2 WHERE job_uid = ? AND job_status NOT IN (3, -1)");
+                ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                return ps.executeUpdate() > 0;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.EXECUTE.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on job cancel", e);
+        }
+    }
+
+    public boolean archiveJobRecord(Authentication authentication, UUID jobUID) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.WRITE)) {
+                PreparedStatement ps = conn.prepareStatement("UPDATE AUDIT_LOG SET archived = 1 WHERE job_uid = ? AND job_status IN (3, -1)");
+                ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                return ps.executeUpdate() > 0;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.WRITE.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on job archive", e);
         }
     }
 

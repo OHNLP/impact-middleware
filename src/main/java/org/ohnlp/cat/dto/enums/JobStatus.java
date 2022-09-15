@@ -8,7 +8,8 @@ public enum JobStatus {
     PREFLIGHT(1),
     IN_PROGRESS(2),
     COMPLETE(3),
-    ERROR(-1);
+    ERROR(-1),
+    CANCELED(-2);
 
     private final int code;
     private static Map<Integer, JobStatus> codeToStatus;
