@@ -1,8 +1,10 @@
 package org.ohnlp.cat;
 
+import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
+@ConfigurationProperties(prefix="cat")
 public class ApplicationConfiguration {
 
     private Persistence persistence;
