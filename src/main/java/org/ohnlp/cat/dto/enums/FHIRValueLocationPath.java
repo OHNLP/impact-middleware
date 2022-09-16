@@ -1,6 +1,9 @@
 package org.ohnlp.cat.dto.enums;
 
 public enum FHIRValueLocationPath {
+    PERSON_ID("identifier"),
+    PERSON_GENDER("gender"),
+    PERSON_DOB("birthDate"),
     CONDITION_CODE("code.coding.code"),
     PROCEDURE_CODE("code.coding.code"),
     MEDICATION_CODE("medication.coding.code"),
