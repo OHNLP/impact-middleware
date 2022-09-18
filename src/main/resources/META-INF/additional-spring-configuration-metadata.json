@@ -1,8 +1,13 @@
 {
   "properties": [
     {
-      "name": "persistence.url",
+      "name": "cat.persistence.url",
       "type": "java.lang.String",
       "description": "JDBC URL For Persistence Operations"
+    },
+    {
+      "name": "cat.applicationURL",
+      "type": "java.lang.String",
+      "description": "URL for Callback Operations to this Application"
     }
   ] }

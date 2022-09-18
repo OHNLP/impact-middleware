@@ -49,12 +49,11 @@ public class JobController {
     JobInfoDTO createJob(Authentication authentication, @RequestParam("project_uid") UUID projectUID) {
         JobInfoDTO jobInfo;
         try {
-            jobInfo = storage.createJobRecord(authentication, projectUID);
+            jobInfo = storage.runJob(authentication, projectUID);
         } catch (Throwable e) {
             // TODO log the IOException
             throw new RuntimeException("Error occurred on job creation");
         }
-        // TODO actually trigger job (abstractified launcher for beam script)
         return jobInfo;
     }
 
@@ -67,9 +66,9 @@ public class JobController {
             }
         } catch (Throwable e) {
             // TODO log the IOException
-            throw new RuntimeException("Error occurred on job creation");
+            throw new RuntimeException("Error occurred on job cancel");
         }
-        return false; // TODO actually cancel the job instead of just creating record
+        return false;
     }
 
     @DeleteMapping("/")

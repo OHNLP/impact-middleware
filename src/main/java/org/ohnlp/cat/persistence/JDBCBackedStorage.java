@@ -9,6 +9,7 @@ import org.ohnlp.cat.dto.enums.JobStatus;
 import org.ohnlp.cat.dto.enums.PatientJudgementState;
 import org.ohnlp.cat.dto.enums.JudgementState;
 import org.ohnlp.cat.dto.enums.ProjectAuthorityGrant;
+import org.ohnlp.cat.executors.JobExecutorManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
@@ -22,12 +23,16 @@ import java.util.Date;
 // TODO permissions checks for all functions?
 @Component
 public class JDBCBackedStorage {
+    private final JobExecutorManager jobExecutor;
+    private final ApplicationConfiguration config;
     private ComboPooledDataSource datasource;
     private ThreadLocal<ObjectMapper> om = ThreadLocal.withInitial(ObjectMapper::new);
 
     @Autowired
-    public JDBCBackedStorage(ApplicationConfiguration config) {
+    public JDBCBackedStorage(ApplicationConfiguration config, JobExecutorManager jobExecutor) {
         initDBConn(config);
+        this.jobExecutor = jobExecutor;
+        this.config = config;
     }
 
     // ===== Project Management Methods ===== //
@@ -580,7 +585,7 @@ public class JDBCBackedStorage {
         }
     }
 
-    public JobInfoDTO createJobRecord(Authentication authentication, UUID projectUID) throws IOException {
+    public JobInfoDTO runJob(Authentication authentication, UUID projectUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.EXECUTE)) {
                 // Use Current/Latest criterion by date
@@ -588,12 +593,15 @@ public class JDBCBackedStorage {
                 ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
                 ResultSet rs = ps.executeQuery();
                 long criterionRowID;
+                CriterionDefinitionDTO criterion;
                 if (rs.next()) {
                     criterionRowID = rs.getLong("row_uid");
+                    criterion = om.get().readValue(rs.getString("criterion"), CriterionDefinitionDTO.class);
                 } else {
                     throw new IllegalArgumentException("Project " + projectUID + " has no active criterion stored");
                 }
                 rs.close();
+                // Create the audit record first so that if the executor starts right away it has information to retrieve
                 UUID jobUID = UUID.randomUUID();
                 long jobTimestamp = System.currentTimeMillis();
                 ps = conn.prepareStatement("INSERT INTO cat.AUDIT_LOG (project_uid, job_uid, criterion_uid, user_uid, start_date, job_status) VALUES (?, ?, ?, ?, ?, ?)");
@@ -606,6 +614,21 @@ public class JDBCBackedStorage {
                 if (ps.executeUpdate() < 1) {
                     throw new IOException("No rows updated in audit log for job creation");
                 }
+                // Now actually attempt to start the job
+                String executorJobUID;
+                try {
+                    executorJobUID = jobExecutor.getExecutor().startJob(jobUID, criterion, config.getApplicationURL());
+                } catch (Throwable t) {
+                    // Delete the audit record as the job never actually started
+                    ps = conn.prepareStatement("DELETE FROM cat.AUDIT_LOG WHERE job_uid = ?");
+                    ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                    ps.executeUpdate();
+                    throw new IOException("Failed to start job execution", t);
+                }
+                ps = conn.prepareStatement("UPDATE cat.AUDIT_LOG SET executor_job_uid = ? where job_uid = ?");
+                ps.setString(1, executorJobUID);
+                ps.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
+                ps.executeUpdate(); // TODO handle update fails(?) Problem is job is eventually still queued anyways at this point
                 JobInfoDTO ret = new JobInfoDTO();
                 ret.setJob_uid(jobUID);
                 ret.setProject_uid(projectUID);
@@ -619,6 +642,22 @@ public class JDBCBackedStorage {
         } catch (Throwable e) {
             e.printStackTrace(); // TODO log exceptions to DB
             throw new IOException("Error on job creation", e);
+        }
+    }
+
+    public boolean setJobStatus(Authentication authentication, UUID jobUID, JobStatus status) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.EXECUTE)) {
+                PreparedStatement ps = conn.prepareStatement("UPDATE AUDIT_LOG SET job_status = ? WHERE job_uid = ?");
+                ps.setInt(1, status.getCode());
+                ps.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
+                return ps.executeUpdate() > 0;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.EXECUTE.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on job cancel", e);
         }
     }
 

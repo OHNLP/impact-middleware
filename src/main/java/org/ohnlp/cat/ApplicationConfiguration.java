@@ -7,6 +7,16 @@ import org.springframework.context.annotation.Configuration;
 @ConfigurationProperties(prefix="cat")
 public class ApplicationConfiguration {
 
+    private String applicationURL;
+
+    public String getApplicationURL() {
+        return applicationURL;
+    }
+
+    public void setApplicationURL(String applicationURL) {
+        this.applicationURL = applicationURL;
+    }
+
     private Persistence persistence;
 
     public Persistence getPersistence() {
@@ -15,6 +25,16 @@ public class ApplicationConfiguration {
 
     public void setPersistence(Persistence persistence) {
         this.persistence = persistence;
+    }
+
+    private String jobExecutorClass;
+
+    public String getJobExecutorClass() {
+        return jobExecutorClass;
+    }
+
+    public void setJobExecutorClass(String jobExecutorClass) {
+        this.jobExecutorClass = jobExecutorClass;
     }
 
     public static class Persistence {
