@@ -3,7 +3,7 @@ package org.ohnlp.cat.executors;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.ohnlp.cat.dto.CriterionDefinitionDTO;
+import org.ohnlp.cat.api.criteria.Criterion;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
@@ -57,7 +57,7 @@ public class FlinkExecutor implements JobExecutor {
     }
 
     @Override
-    public String startJob(UUID jobUID, CriterionDefinitionDTO dto, String callbackURL) throws Exception {
+    public String startJob(UUID jobUID, Criterion criterion, String callbackURL) throws Exception {
         ObjectNode requestBody = JsonNodeFactory.instance.objectNode();
         requestBody.put("entryClass", "org.ohnlp.ir.cat.CohortIdentificationJob");
         requestBody.put("programArgs", String.join(",",

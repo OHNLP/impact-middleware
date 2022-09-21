@@ -1,6 +1,6 @@
 package org.ohnlp.cat.controllers;
 
-import org.ohnlp.cat.dto.JobInfoDTO;
+import org.ohnlp.cat.api.jobs.Job;
 import org.ohnlp.cat.persistence.JDBCBackedStorage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
@@ -23,7 +23,7 @@ public class JobController {
 
     @GetMapping("/user")
     public @ResponseBody
-    List<JobInfoDTO> getJobsForUser(Authentication authentication) {
+    List<Job> getJobsForUser(Authentication authentication) {
         try {
             return storage.getJobsForUser(authentication);
         } catch (Throwable e) {
@@ -34,7 +34,7 @@ public class JobController {
 
     @GetMapping("/project")
     public @ResponseBody
-    List<JobInfoDTO> getJobsByProject(Authentication authentication, @RequestParam("project_uid") UUID projectUID) {
+    List<Job> getJobsByProject(Authentication authentication, @RequestParam("project_uid") UUID projectUID) {
         try {
             return storage.getJobsForProject(authentication, projectUID);
         } catch (Throwable e) {
@@ -46,8 +46,8 @@ public class JobController {
 
     @PostMapping("/create")
     public @ResponseBody
-    JobInfoDTO createJob(Authentication authentication, @RequestParam("project_uid") UUID projectUID) {
-        JobInfoDTO jobInfo;
+    Job createJob(Authentication authentication, @RequestParam("project_uid") UUID projectUID) {
+        Job jobInfo;
         try {
             jobInfo = storage.runJob(authentication, projectUID);
         } catch (Throwable e) {

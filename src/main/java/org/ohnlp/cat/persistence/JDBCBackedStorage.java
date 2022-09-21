@@ -4,11 +4,15 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mchange.v2.c3p0.ComboPooledDataSource;
 import org.ohnlp.cat.ApplicationConfiguration;
-import org.ohnlp.cat.dto.*;
-import org.ohnlp.cat.dto.enums.JobStatus;
-import org.ohnlp.cat.dto.enums.PatientJudgementState;
-import org.ohnlp.cat.dto.enums.JudgementState;
-import org.ohnlp.cat.dto.enums.ProjectAuthorityGrant;
+import org.ohnlp.cat.api.cohorts.CandidateInclusion;
+import org.ohnlp.cat.api.cohorts.CohortCandidate;
+import org.ohnlp.cat.api.criteria.*;
+import org.ohnlp.cat.api.evidence.Evidence;
+import org.ohnlp.cat.api.jobs.Job;
+import org.ohnlp.cat.api.jobs.JobStatus;
+import org.ohnlp.cat.api.projects.Project;
+import org.ohnlp.cat.api.projects.ProjectAuthorityGrant;
+import org.ohnlp.cat.api.projects.ProjectRole;
 import org.ohnlp.cat.executors.JobExecutorManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
@@ -36,8 +40,8 @@ public class JDBCBackedStorage {
     }
 
     // ===== Project Management Methods ===== //
-    public List<ProjectDTO> getProjectList(Authentication authentication) throws IOException {
-        List<ProjectDTO> ret = new ArrayList<>();
+    public List<Project> getProjectList(Authentication authentication) throws IOException {
+        List<Project> ret = new ArrayList<>();
         try (Connection conn = this.datasource.getConnection()) {
             // If the user has any role grant, then user can at least view said project and it should be returned
             // If the project exists in project archive (pa.row_uid is not null) then do not return to user.
@@ -50,7 +54,7 @@ public class JDBCBackedStorage {
             ps.setString(1, userIdForAuth(authentication));
             ResultSet rs = ps.executeQuery();
             while (rs.next()) {
-                ProjectDTO project = new ProjectDTO();
+                Project project = new Project();
                 project.setName(rs.getString("project_name"));
                 project.setUid(UUID.fromString(rs.getString("project_uid")));
                 ret.add(project);
@@ -62,9 +66,9 @@ public class JDBCBackedStorage {
         }
     }
 
-    public ProjectDTO createProject(Authentication authentication, String projectName) throws IOException {
+    public Project createProject(Authentication authentication, String projectName) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
-            ProjectDTO ret = new ProjectDTO();
+            Project ret = new Project();
             ret.setUid(UUID.randomUUID());
             ret.setName(projectName);
             // Begin atomic transaction block
@@ -95,7 +99,7 @@ public class JDBCBackedStorage {
     }
 
 
-    public ProjectDTO renameProject(Authentication authentication, UUID projectUID, String projectName) throws IOException {
+    public Project renameProject(Authentication authentication, UUID projectUID, String projectName) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.ADMIN)) {
                 PreparedStatement updateProject = conn.prepareStatement("UPDATE cat.projects SET project_name = ? where project_uid = ?");
@@ -104,7 +108,7 @@ public class JDBCBackedStorage {
                 if (updateProject.executeUpdate() < 1) {
                     throw new IllegalStateException("Failed to edit project due to 0-change write to projects");
                 }
-                ProjectDTO ret = new ProjectDTO();
+                Project ret = new Project();
                 ret.setName(projectName);
                 ret.setUid(projectUID);
                 return ret;
@@ -117,18 +121,18 @@ public class JDBCBackedStorage {
         }
     }
 
-    public Boolean updateRoleGrants(Authentication authentication, ProjectRoleDTO role) throws IOException {
+    public Boolean updateRoleGrants(Authentication authentication, ProjectRole role) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
-            if (checkUserAuthority(conn, role.getProject_uid(), authentication, ProjectAuthorityGrant.WRITE)) {
+            if (checkUserAuthority(conn, role.getProjectUID(), authentication, ProjectAuthorityGrant.WRITE)) {
                 // Try update first
                 PreparedStatement updateRoles = conn.prepareStatement("UPDATE cat.PROJECT_ROLE_GRANTS SET grant_type = ? WHERE project_uid = ? AND user_uid = ?");
                 updateRoles.setString(1, role.getGrant().name());
-                updateRoles.setString(2, role.getProject_uid().toString().toUpperCase(Locale.ROOT));
-                updateRoles.setString(3, role.getUser_uid().toUpperCase(Locale.ROOT)); // TODO handle checking if user exists in system
+                updateRoles.setString(2, role.getProjectUID().toString().toUpperCase(Locale.ROOT));
+                updateRoles.setString(3, role.getUserUID().toUpperCase(Locale.ROOT)); // TODO handle checking if user exists in system
                 if (updateRoles.executeUpdate() < 1) { // No preexisting role for user on project
                     PreparedStatement insertRoles = conn.prepareStatement("INSERT INTO PROJECT_ROLE_GRANTS (project_uid, user_uid, grant_type) VALUES (?, ?, ?)");
-                    insertRoles.setString(1, role.getProject_uid().toString().toUpperCase(Locale.ROOT));
-                    insertRoles.setString(2, role.getUser_uid().toUpperCase(Locale.ROOT)); // TODO handle checking if user exists in system
+                    insertRoles.setString(1, role.getProjectUID().toString().toUpperCase(Locale.ROOT));
+                    insertRoles.setString(2, role.getUserUID().toUpperCase(Locale.ROOT)); // TODO handle checking if user exists in system
                     insertRoles.setString(3, role.getGrant().name()); //
                     insertRoles.executeUpdate();
                 }
@@ -160,14 +164,14 @@ public class JDBCBackedStorage {
         }
     }
 
-    public CriterionDefinitionDTO getProjectCriterion(Authentication authentication, UUID projectUID) throws IOException {
+    public Criterion getProjectCriterion(Authentication authentication, UUID projectUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.READ)) {
                 PreparedStatement ps = conn.prepareStatement("SELECT criterion, revision_date FROM cat.PROJECT_CRITERION p WHERE project_uid = ? ORDER BY revision_date DESC");
                 ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
                 ResultSet rs = ps.executeQuery();
                 if (rs.next()) {
-                    return om.get().readValue(rs.getString(1), CriterionDefinitionDTO.class);
+                    return om.get().readValue(rs.getString(1), Criterion.class);
                 }
             }
             return null;
@@ -177,7 +181,7 @@ public class JDBCBackedStorage {
         }
     }
 
-    public Boolean writeProjectCriterion(Authentication authentication, UUID projectUID, CriterionDefinitionDTO def) throws IOException {
+    public Boolean writeProjectCriterion(Authentication authentication, UUID projectUID, Criterion def) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.WRITE)) {
                 // Never try updating, instead always create new criterion definition with timestamp so that history is retained
@@ -197,7 +201,7 @@ public class JDBCBackedStorage {
 
     // ===== Cohort Related Methods ===== //
     // Gets the current evaluated cohort for a given project/user. TODO consider adding pagination in returned results (sort by score)
-    public List<PatInfoDTO> getRetrievedCohort(Authentication authentication, UUID jobUID) throws IOException {
+    public List<CohortCandidate> getRetrievedCohort(Authentication authentication, UUID jobUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
                 PreparedStatement ps = conn.prepareStatement(
@@ -206,16 +210,16 @@ public class JDBCBackedStorage {
                                 "     ON c.row_uid = j.cohort_row_uid ORDER BY c.score DESC");
                 ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
                 ps.setString(2, userIdForAuth(authentication));
-                List<PatInfoDTO> ret = new ArrayList<>();
+                List<CohortCandidate> ret = new ArrayList<>();
                 ResultSet rs = ps.executeQuery();
                 while (rs.next()) {
-                    PatInfoDTO next = new PatInfoDTO();
-                    next.setPat_id(rs.getString("patient_uid"));
+                    CohortCandidate next = new CohortCandidate();
+                    next.setPatUID(rs.getString("patient_uid"));
                     String jgmt = rs.getString("judgement");
                     if (jgmt != null) {
-                        next.setInclusion(PatientJudgementState.valueOf(jgmt.toUpperCase(Locale.ROOT)));
+                        next.setInclusion(CandidateInclusion.valueOf(jgmt.toUpperCase(Locale.ROOT)));
                     } else {
-                        next.setInclusion(PatientJudgementState.UNJUDGED);
+                        next.setInclusion(CandidateInclusion.UNJUDGED);
                     }
                     ret.add(next);
                 }
@@ -229,10 +233,10 @@ public class JDBCBackedStorage {
         }
     }
 
-    public Map<String, PatientJudgementState> getCohortRelevance(Authentication authentication, UUID jobUID, String... patientUIDs) throws IOException {
+    public Map<String, CandidateInclusion> getCohortRelevance(Authentication authentication, UUID jobUID, String... patientUIDs) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
-                Map<String, PatientJudgementState> ret = new HashMap<>();
+                Map<String, CandidateInclusion> ret = new HashMap<>();
                 PreparedStatement ps = conn.prepareStatement("SELECT judgement " +
                         "FROM cat.COHORT c " +
                         "JOIN cat.COHORT_RELEVANCE cr ON c.row_uid = cr.cohort_row_uid " +
@@ -243,9 +247,9 @@ public class JDBCBackedStorage {
                     ps.setString(3, userIdForAuth(authentication));
                     ResultSet rs = ps.executeQuery();
                     if (rs.next()) {
-                        ret.put(patientUID, PatientJudgementState.valueOf(rs.getString("judgement")));
+                        ret.put(patientUID, CandidateInclusion.valueOf(rs.getString("judgement")));
                     } else {
-                        ret.put(patientUID, PatientJudgementState.UNJUDGED);
+                        ret.put(patientUID, CandidateInclusion.UNJUDGED);
                     }
                 }
                 return ret;
@@ -259,7 +263,7 @@ public class JDBCBackedStorage {
     }
 
     public boolean writeCohortJudgement(Authentication authentication, UUID jobUID,
-                                     String patId, PatientJudgementState inclusion) throws IOException {
+                                     String patId, CandidateInclusion inclusion) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
                 // Manually check exists instead of using MERGE because not all SQL dialects support it
@@ -301,7 +305,7 @@ public class JDBCBackedStorage {
         }
     }
 
-    public Map<String, JudgementDTO> getCriterionMatchStatus(Authentication authentication, UUID jobUID) throws IOException {
+    public Map<String, CriterionInfo> getCriterionMatchStatus(Authentication authentication, UUID jobUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
                 PreparedStatement ps = conn.prepareStatement(
@@ -312,18 +316,18 @@ public class JDBCBackedStorage {
                 );
                 ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
                 ResultSet rs = ps.executeQuery();
-                CriterionDefinitionDTO def;
+                Criterion def;
                 if (rs.next()) {
-                    def = om.get().readValue(rs.getString("criterion"), CriterionDefinitionDTO.class);
+                    def = om.get().readValue(rs.getString("criterion"), Criterion.class);
                 } else {
                     throw new IllegalStateException("No definition stored for job");
                 }
                 Set<String> nodeUIDs = new HashSet<>();
                 recursSearchNodeUIDsFromDef(def, nodeUIDs);
-                Map<String, JudgementDTO> judgements = new HashMap<>();
+                Map<String, CriterionInfo> judgements = new HashMap<>();
                 nodeUIDs.forEach(node_uid -> {
                     try {
-                        JudgementDTO nodeJudgement = new JudgementDTO();
+                        CriterionInfo nodeJudgement = new CriterionInfo();
                         // Check for a node-level judgement first. If there is one, override everything
                         PreparedStatement nodeRetrieval = conn.prepareStatement(
                                 "SELECT nr.judgement, nr.comment FROM NODE_RELEVANCE nr WHERE nr.job_uid = ? AND nr.judger_uid = ? AND AND nr.node_uid = ?");
@@ -334,7 +338,7 @@ public class JDBCBackedStorage {
                         if (rs2.next()) {
                             String judgement = rs2.getString("judgement");
                             if (judgement != null) {
-                                nodeJudgement.setJudgement(JudgementState.valueOf(judgement));
+                                nodeJudgement.setJudgement(CriterionJudgement.valueOf(judgement));
                             }
                             nodeJudgement.setComment(rs2.getString("comment"));
                         }
@@ -353,7 +357,7 @@ public class JDBCBackedStorage {
                         rs2 = evidenceRetrieval.executeQuery();
                         boolean found = false;
                         boolean nonNLPFound = false;
-                        JudgementState evidenceJudgementState = JudgementState.NO_EVIDENCE_FOUND;
+                        CriterionJudgement evidenceJudgementState = CriterionJudgement.NO_EVIDENCE_FOUND;
                         // First, determine if there is a user judgement overriding default algorithmic matches
                         while (rs2.next()) {
                             found = true;
@@ -362,18 +366,18 @@ public class JDBCBackedStorage {
                             }
                             String judgement = rs.getString("judgement");
                             if (judgement != null) {
-                                JudgementState parsedJudgement = JudgementState.valueOf(judgement);
+                                CriterionJudgement parsedJudgement = CriterionJudgement.valueOf(judgement);
                                 if (evidenceJudgementState.compareTo(parsedJudgement) > 0) { // Lower priority than the parsed judgement
                                     evidenceJudgementState = parsedJudgement;
                                 }
                             }
                         }
                         // Now adjust if there are no user judgements but there is evidence
-                        if (found && (evidenceJudgementState.equals(JudgementState.NO_EVIDENCE_FOUND))) {
+                        if (found && (evidenceJudgementState.equals(CriterionJudgement.NO_EVIDENCE_FOUND))) {
                             if (!nonNLPFound) {
-                                evidenceJudgementState = JudgementState.EVIDENCE_FOUND;
+                                evidenceJudgementState = CriterionJudgement.EVIDENCE_FOUND;
                             } else {
-                                evidenceJudgementState = JudgementState.EVIDENCE_FOUND_NLP;
+                                evidenceJudgementState = CriterionJudgement.EVIDENCE_FOUND_NLP;
                             }
                         }
                         rs2.close();
@@ -393,18 +397,20 @@ public class JDBCBackedStorage {
         }
     }
 
-    private void recursSearchNodeUIDsFromDef(CriterionDefinitionDTO def, Set<String> nodeUIDs) {
-        if (def.getEntity() != null) {
-            nodeUIDs.add(def.getNode_id().toString());
-        } else {
-            for (CriterionDefinitionDTO child : def.getChildren()) {
+    private void recursSearchNodeUIDsFromDef(Criterion def, Set<String> nodeUIDs) {
+        if (def instanceof EntityCriterion) {
+            nodeUIDs.add(def.getNodeUID().toString().toUpperCase(Locale.ROOT));
+        } else if (def instanceof LogicalCriterion) {
+            for (Criterion child : ((LogicalCriterion) def).getChildren()) {
                 recursSearchNodeUIDsFromDef(child, nodeUIDs);
             }
+        } else {
+            throw new UnsupportedOperationException("Unknown criterion object type " + def.getClass().getName());
         }
     }
 
 
-    public Map<String, JudgementDTO> setCriterionMatchStatus(Authentication authentication, UUID jobUID, UUID nodeUID, JudgementDTO judgement) throws IOException {
+    public Map<String, CriterionInfo> setCriterionMatchStatus(Authentication authentication, UUID jobUID, UUID nodeUID, CriterionInfo judgement) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
                 PreparedStatement ps = conn.prepareStatement("UPDATE cat.NODE_RELEVANCE SET judgement = ?, comment = ? WHERE node_uid = ? AND judger_uid = ?");
@@ -432,10 +438,10 @@ public class JDBCBackedStorage {
 
     // ===== Evidence Related Methods ===== //
 
-    public Map<String, JudgementState> getEvidenceRelevance(Authentication authentication, UUID jobUID, UUID nodeUID, String... evidenceUIDs) throws IOException {
+    public Map<String, CriterionJudgement> getEvidenceRelevance(Authentication authentication, UUID jobUID, UUID nodeUID, String... evidenceUIDs) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
-                Map<String, JudgementState> ret = new HashMap<>();
+                Map<String, CriterionJudgement> ret = new HashMap<>();
                 PreparedStatement ps = conn.prepareStatement("SELECT er.judgement " +
                         "FROM cat.EVIDENCE e " +
                         "JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid " +
@@ -447,9 +453,9 @@ public class JDBCBackedStorage {
                     ps.setString(4, userIdForAuth(authentication));
                     ResultSet rs = ps.executeQuery();
                     if (rs.next()) {
-                        ret.put(evidenceUID, JudgementState.valueOf(rs.getString("judgement")));
+                        ret.put(evidenceUID, CriterionJudgement.valueOf(rs.getString("judgement")));
                     } else {
-                        ret.put(evidenceUID, JudgementState.UNJUDGED);
+                        ret.put(evidenceUID, CriterionJudgement.UNJUDGED);
                     }
                 }
                 return ret;
@@ -462,7 +468,7 @@ public class JDBCBackedStorage {
         }
     }
 
-    public Boolean writeEvidenceJudgement(Authentication authentication, UUID jobUID, UUID nodeUID, String evidenceUID, JudgementState judgement) throws IOException {
+    public Boolean writeEvidenceJudgement(Authentication authentication, UUID jobUID, UUID nodeUID, String evidenceUID, CriterionJudgement judgement) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
                 // Manually check exists instead of using MERGE because not all SQL dialects support it
@@ -505,7 +511,7 @@ public class JDBCBackedStorage {
         }
     }
 
-    public List<EvidenceDTO> getEvidenceForNode(
+    public List<Evidence> getEvidenceForNode(
             Authentication authentication, UUID jobUID, UUID nodeUID, String personUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
@@ -515,9 +521,9 @@ public class JDBCBackedStorage {
                 ps.setString(2, nodeUID.toString().toUpperCase(Locale.ROOT));
                 ps.setString(3, personUID);
                 ResultSet rs = ps.executeQuery();
-                List<EvidenceDTO> ret = new ArrayList<>();
+                List<Evidence> ret = new ArrayList<>();
                 while (rs.next()) {
-                    EvidenceDTO evidence = new EvidenceDTO();
+                    Evidence evidence = new Evidence();
                     evidence.setEvidenceUID(rs.getString("evidence_uid"));
                     evidence.setScore(rs.getDouble("score"));
                     ret.add(evidence);
@@ -534,20 +540,20 @@ public class JDBCBackedStorage {
 
     // ===== Job Related Methods =====/
 
-    public List<JobInfoDTO> getJobsForUser(Authentication authentication) throws IOException {
+    public List<Job> getJobsForUser(Authentication authentication) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             // No need to check user authority to read own jobs
-            List<JobInfoDTO> ret = new ArrayList<>();
+            List<Job> ret = new ArrayList<>();
                 PreparedStatement ps = conn.prepareStatement(
                         "SELECT job_uid, project_uid, start_date, user_uid, job_status FROM cat.AUDIT_LOG WHERE user_uid = ? AND archived = 0 ORDER BY start_date DESC");
                 ps.setString(1, userIdForAuth(authentication));
                 ResultSet rs = ps.executeQuery();
                 while (rs.next()) {
-                    JobInfoDTO info = new JobInfoDTO();
-                    info.setProject_uid(UUID.fromString(rs.getString("project_uid")));
+                    Job info = new Job();
+                    info.setProjectUID(UUID.fromString(rs.getString("project_uid")));
                     info.setStartDate(rs.getTimestamp("start_date"));
                     info.setStatus(JobStatus.forCode(rs.getInt("job_status")));
-                    info.setJob_uid(UUID.fromString(rs.getString("job_uid")));
+                    info.setJobUID(UUID.fromString(rs.getString("job_uid")));
                     ret.add(info);
                 }
                 return ret;
@@ -558,20 +564,20 @@ public class JDBCBackedStorage {
         }
     }
 
-    public List<JobInfoDTO> getJobsForProject(Authentication authentication, UUID projectUID) throws IOException {
+    public List<Job> getJobsForProject(Authentication authentication, UUID projectUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
-            List<JobInfoDTO> ret = new ArrayList<>();
+            List<Job> ret = new ArrayList<>();
             if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.READ)) {
                 PreparedStatement ps = conn.prepareStatement(
                         "SELECT job_uid, start_date, user_uid, job_status FROM cat.AUDIT_LOG WHERE project_uid = ? AND archived = 0 ORDER BY start_date DESC");
                 ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
                 ResultSet rs = ps.executeQuery();
                 while (rs.next()) {
-                    JobInfoDTO info = new JobInfoDTO();
-                    info.setProject_uid(projectUID);
+                    Job info = new Job();
+                    info.setProjectUID(projectUID);
                     info.setStartDate(rs.getTimestamp("start_date"));
                     info.setStatus(JobStatus.forCode(rs.getInt("job_status")));
-                    info.setJob_uid(UUID.fromString(rs.getString("job_uid")));
+                    info.setJobUID(UUID.fromString(rs.getString("job_uid")));
                     ret.add(info);
                 }
                 return ret;
@@ -585,7 +591,7 @@ public class JDBCBackedStorage {
         }
     }
 
-    public JobInfoDTO runJob(Authentication authentication, UUID projectUID) throws IOException {
+    public Job runJob(Authentication authentication, UUID projectUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.EXECUTE)) {
                 // Use Current/Latest criterion by date
@@ -593,10 +599,10 @@ public class JDBCBackedStorage {
                 ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
                 ResultSet rs = ps.executeQuery();
                 long criterionRowID;
-                CriterionDefinitionDTO criterion;
+                Criterion criterion;
                 if (rs.next()) {
                     criterionRowID = rs.getLong("row_uid");
-                    criterion = om.get().readValue(rs.getString("criterion"), CriterionDefinitionDTO.class);
+                    criterion = om.get().readValue(rs.getString("criterion"), Criterion.class);
                 } else {
                     throw new IllegalArgumentException("Project " + projectUID + " has no active criterion stored");
                 }
@@ -629,9 +635,9 @@ public class JDBCBackedStorage {
                 ps.setString(1, executorJobUID);
                 ps.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
                 ps.executeUpdate(); // TODO handle update fails(?) Problem is job is eventually still queued anyways at this point
-                JobInfoDTO ret = new JobInfoDTO();
-                ret.setJob_uid(jobUID);
-                ret.setProject_uid(projectUID);
+                Job ret = new Job();
+                ret.setJobUID(jobUID);
+                ret.setProjectUID(projectUID);
                 ret.setStartDate(new Date(jobTimestamp));
                 ret.setStatus(JobStatus.QUEUED);
                 return ret;

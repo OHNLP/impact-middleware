@@ -1,8 +1,8 @@
 package org.ohnlp.cat.controllers;
 
-import org.ohnlp.cat.dto.CriterionDefinitionDTO;
-import org.ohnlp.cat.dto.ProjectDTO;
-import org.ohnlp.cat.dto.ProjectRoleDTO;
+import org.ohnlp.cat.api.criteria.Criterion;
+import org.ohnlp.cat.api.projects.Project;
+import org.ohnlp.cat.api.projects.ProjectRole;
 import org.ohnlp.cat.persistence.JDBCBackedStorage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
@@ -25,7 +25,7 @@ public class ProjectController {
 
     @GetMapping("/")
     public @ResponseBody
-    List<ProjectDTO> getProjectList(Authentication authentication) {
+    List<Project> getProjectList(Authentication authentication) {
         try {
             return storage.getProjectList(authentication);
         } catch (Throwable e) {
@@ -36,7 +36,7 @@ public class ProjectController {
 
     @PutMapping("/create")
     public @ResponseBody
-    ProjectDTO createProject(Authentication authentication, @RequestParam(name="name") String projectName) {
+    Project createProject(Authentication authentication, @RequestParam(name="name") String projectName) {
         try {
             return storage.createProject(authentication, projectName);
         } catch (Throwable e) {
@@ -47,7 +47,7 @@ public class ProjectController {
 
     @PostMapping("/rename")
     public @ResponseBody
-    ProjectDTO renameProject(Authentication authentication, @RequestParam(name="project_name") String projectName, @RequestParam(name="project_uid") UUID uid) {
+    Project renameProject(Authentication authentication, @RequestParam(name="project_name") String projectName, @RequestParam(name="project_uid") UUID uid) {
         try {
             return storage.renameProject(authentication, uid, projectName);
         } catch (Throwable e) {
@@ -58,7 +58,7 @@ public class ProjectController {
 
     @PostMapping("/roles")
     public @ResponseBody
-    Boolean setUserRole(Authentication authentication, @RequestBody ProjectRoleDTO roleDef) {
+    Boolean setUserRole(Authentication authentication, @RequestBody ProjectRole roleDef) {
         try {
             return storage.updateRoleGrants(authentication, roleDef);
         } catch (Throwable e) {
@@ -80,7 +80,7 @@ public class ProjectController {
 
     @GetMapping("/criterion")
     public @ResponseBody
-    CriterionDefinitionDTO getProjectCriterion(Authentication authentication, @RequestParam(name="project_uid") UUID uid) {
+    Criterion getProjectCriterion(Authentication authentication, @RequestParam(name="project_uid") UUID uid) {
         try {
             return storage.getProjectCriterion(authentication, uid);
         } catch (Throwable e) {
@@ -91,7 +91,7 @@ public class ProjectController {
 
     @PostMapping("/criterion")
     public @ResponseBody
-    Boolean writeProjectCriterion(Authentication authentication, @RequestParam(name="project_uid") UUID uid, @RequestBody CriterionDefinitionDTO criterion) {
+    Boolean writeProjectCriterion(Authentication authentication, @RequestParam(name="project_uid") UUID uid, @RequestBody Criterion criterion) {
         try {
             return storage.writeProjectCriterion(authentication, uid, criterion);
         } catch (Throwable e) {

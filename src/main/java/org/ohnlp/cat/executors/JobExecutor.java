@@ -1,6 +1,6 @@
 package org.ohnlp.cat.executors;
 
-import org.ohnlp.cat.dto.CriterionDefinitionDTO;
+import org.ohnlp.cat.api.criteria.Criterion;
 
 import java.util.UUID;
 
@@ -16,5 +16,5 @@ public interface JobExecutor {
      * null otherwise.
      * @throws Exception - If error occurs during the Job Scheduling Process
      */
-    String startJob(UUID jobUID, CriterionDefinitionDTO criterion, String callbackURL) throws Exception;
+    String startJob(UUID jobUID, Criterion criterion, String callbackURL) throws Exception;
 }

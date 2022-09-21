@@ -1,10 +1,10 @@
 package org.ohnlp.cat.controllers;
 
-import org.ohnlp.cat.dto.EvidenceDTO;
-import org.ohnlp.cat.dto.JudgementDTO;
-import org.ohnlp.cat.dto.PatInfoDTO;
-import org.ohnlp.cat.dto.enums.PatientJudgementState;
-import org.ohnlp.cat.dto.enums.JudgementState;
+import org.ohnlp.cat.api.cohorts.CandidateInclusion;
+import org.ohnlp.cat.api.cohorts.CohortCandidate;
+import org.ohnlp.cat.api.criteria.CriterionInfo;
+import org.ohnlp.cat.api.criteria.CriterionJudgement;
+import org.ohnlp.cat.api.evidence.Evidence;
 import org.ohnlp.cat.persistence.JDBCBackedStorage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
@@ -29,8 +29,8 @@ public class CohortController {
 
     @GetMapping("/")
     public @ResponseBody
-    List<PatInfoDTO> getRetrievedCohort(Authentication authentication,
-                                        @RequestParam(name = "job_uid") UUID jobUID) {
+    List<CohortCandidate> getRetrievedCohort(Authentication authentication,
+                                             @RequestParam(name = "job_uid") UUID jobUID) {
         try {
             return storage.getRetrievedCohort(authentication, jobUID);
         } catch (Throwable e) {
@@ -41,10 +41,10 @@ public class CohortController {
 
     @GetMapping("/node_evidence")
     public @ResponseBody
-    List<EvidenceDTO> getEvidenceForNode(Authentication authentication,
-                                         @RequestParam(name = "job_uid") UUID jobUID,
-                                         @RequestParam(name = "node_uid") UUID nodeUID,
-                                         @RequestParam(name = "person_uid") String personUID) {
+    List<Evidence> getEvidenceForNode(Authentication authentication,
+                                      @RequestParam(name = "job_uid") UUID jobUID,
+                                      @RequestParam(name = "node_uid") UUID nodeUID,
+                                      @RequestParam(name = "person_uid") String personUID) {
         try {
             return storage.getEvidenceForNode(
                     authentication,
@@ -60,9 +60,9 @@ public class CohortController {
 
     @GetMapping("/relevance")
     public @ResponseBody
-    Map<String, PatientJudgementState> getCohortRelevance(Authentication authentication,
-                                                          @RequestParam(name = "job_uid") UUID jobUID,
-                                                          @RequestParam(name = "patient_uid") String... patientUIDs) {
+    Map<String, CandidateInclusion> getCohortRelevance(Authentication authentication,
+                                                       @RequestParam(name = "job_uid") UUID jobUID,
+                                                       @RequestParam(name = "patient_uid") String... patientUIDs) {
         try {
             return storage.getCohortRelevance(
                     authentication,
@@ -80,7 +80,7 @@ public class CohortController {
     Boolean writeCohortRelevance(Authentication authentication,
                                  @RequestParam(name = "job_uid") UUID jobUID,
                                  @RequestParam(name = "patient_uid") String patientUID,
-                                 @RequestParam(name = "judgement") PatientJudgementState judgement) {
+                                 @RequestParam(name = "judgement") CandidateInclusion judgement) {
         try {
             return storage.writeCohortJudgement(
                     authentication,
@@ -96,10 +96,10 @@ public class CohortController {
 
     @GetMapping("/node_matchstates")
     public @ResponseBody
-    Map<String, JudgementState> getEvidenceRelevance(Authentication authentication,
-                                                     @RequestParam(name = "job_uid") UUID jobUID,
-                                                     @RequestParam(name = "node_uid") UUID nodeUID,
-                                                     @RequestParam(name = "evidence_uid") String... evidenceUIDs) {
+    Map<String, CriterionJudgement> getEvidenceRelevance(Authentication authentication,
+                                                         @RequestParam(name = "job_uid") UUID jobUID,
+                                                         @RequestParam(name = "node_uid") UUID nodeUID,
+                                                         @RequestParam(name = "evidence_uid") String... evidenceUIDs) {
         try {
             return storage.getEvidenceRelevance(
                     authentication,
@@ -119,7 +119,7 @@ public class CohortController {
                                    @RequestParam(name = "job_uid") UUID jobUID,
                                    @RequestParam(name = "node_uid") UUID nodeUID,
                                    @RequestParam(name = "evidence_uid") String evidenceUID,
-                                   @RequestParam(name = "judgement") JudgementState judgement) {
+                                   @RequestParam(name = "judgement") CriterionJudgement judgement) {
         try {
             return storage.writeEvidenceJudgement(
                     authentication,
@@ -136,8 +136,8 @@ public class CohortController {
 
     @GetMapping("/criterion_match_status")
     public @ResponseBody
-    Map<String, JudgementDTO> getCriterionMatchStatus(Authentication authentication,
-                                                        @RequestParam(name = "job_uid") UUID jobUID) {
+    Map<String, CriterionInfo> getCriterionMatchStatus(Authentication authentication,
+                                                       @RequestParam(name = "job_uid") UUID jobUID) {
         try {
             return storage.getCriterionMatchStatus(authentication, jobUID);
         } catch (Throwable e) {
@@ -148,10 +148,10 @@ public class CohortController {
 
     @PostMapping("/criterion_match_status")
     public @ResponseBody
-    Map<String, JudgementDTO> setCriterionMatchStatus(Authentication authentication,
+    Map<String, CriterionInfo> setCriterionMatchStatus(Authentication authentication,
                                                         @RequestParam(name = "job_uid") UUID jobUID,
                                                         @RequestParam(name = "node_uid") UUID nodeUID,
-                                                        @RequestBody JudgementDTO judgement) {
+                                                        @RequestBody CriterionInfo judgement) {
         try {
             return storage.setCriterionMatchStatus(authentication, jobUID, nodeUID, judgement);
         } catch (Throwable e) {
