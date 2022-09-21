@@ -1,5 +1,7 @@
 package org.ohnlp.cat.controllers;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.ohnlp.cat.api.jobs.Job;
 import org.ohnlp.cat.persistence.JDBCBackedStorage;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 
+@Tag(name="Job Controller", description="Operations relating to Job Creation, Management, and Status")
 @Controller
 @RequestMapping("/_jobs")
 public class JobController {
@@ -21,6 +24,7 @@ public class JobController {
         this.storage = storage;
     }
 
+    @Operation(summary="Gets a listing of jobs associated to the calling user, sorted by date in descending order")
     @GetMapping("/user")
     public @ResponseBody
     List<Job> getJobsForUser(Authentication authentication) {
@@ -32,6 +36,7 @@ public class JobController {
         }
     }
 
+    @Operation(summary="Gets a listing of jobs associated with the given project UID, sorted by date in descending order")
     @GetMapping("/project")
     public @ResponseBody
     List<Job> getJobsByProject(Authentication authentication, @RequestParam("project_uid") UUID projectUID) {
@@ -44,6 +49,7 @@ public class JobController {
     }
 
 
+    @Operation(summary="Queues a new job for the given project UID")
     @PostMapping("/create")
     public @ResponseBody
     Job createJob(Authentication authentication, @RequestParam("project_uid") UUID projectUID) {
@@ -57,6 +63,7 @@ public class JobController {
         return jobInfo;
     }
 
+    @Operation(summary="Cancels the job associated with the given job UID")
     @PostMapping("/cancel")
     public @ResponseBody
     Boolean cancelJob(Authentication authentication, @RequestParam("job_uid") UUID jobUID) {
@@ -71,6 +78,7 @@ public class JobController {
         return false;
     }
 
+    @Operation(summary="Archives the job associated with the given job UID")
     @DeleteMapping("/")
     public @ResponseBody
     Boolean archiveJob(Authentication authentication, @RequestParam("job_uid") UUID jobUID) {

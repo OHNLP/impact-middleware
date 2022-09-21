@@ -436,6 +436,23 @@ public class JDBCBackedStorage {
         return getCriterionMatchStatus(authentication, jobUID);
     }
 
+    public Criterion getJobCriterion(Authentication authentication, UUID jobUID) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
+                PreparedStatement ps = conn.prepareStatement("SELECT criterion FROM cat.AUDIT a WHERE job_uid = ?");
+                ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    return om.get().readValue(rs.getString(1), Criterion.class);
+                }
+            }
+            return null;
+        } catch (SQLException | JsonProcessingException e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on project criteria retrieve", e);
+        }
+    }
+
     // ===== Evidence Related Methods ===== //
 
     public Map<String, CriterionJudgement> getEvidenceRelevance(Authentication authentication, UUID jobUID, UUID nodeUID, String... evidenceUIDs) throws IOException {

@@ -1,7 +1,10 @@
 package org.ohnlp.cat.controllers;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.ohnlp.cat.api.cohorts.CandidateInclusion;
 import org.ohnlp.cat.api.cohorts.CohortCandidate;
+import org.ohnlp.cat.api.criteria.Criterion;
 import org.ohnlp.cat.api.criteria.CriterionInfo;
 import org.ohnlp.cat.api.criteria.CriterionJudgement;
 import org.ohnlp.cat.api.evidence.Evidence;
@@ -15,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+@Tag(name="Cohort Controller", description="Cohort and Evidence Related Methods, Including Results and Evidence Judgements")
 @Controller
 @RequestMapping("/_cohorts")
 public class CohortController {
@@ -27,6 +31,7 @@ public class CohortController {
     }
 
 
+    @Operation(summary="Get a Listing of Cohort Candidate by Job UID")
     @GetMapping("/")
     public @ResponseBody
     List<CohortCandidate> getRetrievedCohort(Authentication authentication,
@@ -39,6 +44,7 @@ public class CohortController {
         }
     }
 
+    @Operation(summary="Get a Listing of Evidence for a given Job/Patient on a Specific Criterion (node) UID")
     @GetMapping("/node_evidence")
     public @ResponseBody
     List<Evidence> getEvidenceForNode(Authentication authentication,
@@ -58,6 +64,7 @@ public class CohortController {
         }
     }
 
+    @Operation(summary="Gets current inclusion status for the given job and list of candidate patient UIDs")
     @GetMapping("/relevance")
     public @ResponseBody
     Map<String, CandidateInclusion> getCohortRelevance(Authentication authentication,
@@ -75,6 +82,7 @@ public class CohortController {
         }
     }
 
+    @Operation(summary="Writes current inclusion status for the given job and candidate patient UID")
     @PostMapping("/relevance")
     public @ResponseBody
     Boolean writeCohortRelevance(Authentication authentication,
@@ -94,7 +102,9 @@ public class CohortController {
         }
     }
 
-    @GetMapping("/node_matchstates")
+    @Operation(summary="Gets match judgement (if present), or algorithmicly determined judgement for a given list " +
+            "of evidence UIDs associated with a given job and criterion (node) UID")
+    @GetMapping("/evidence_relevance")
     public @ResponseBody
     Map<String, CriterionJudgement> getEvidenceRelevance(Authentication authentication,
                                                          @RequestParam(name = "job_uid") UUID jobUID,
@@ -113,7 +123,8 @@ public class CohortController {
         }
     }
 
-    @PostMapping("/evidence")
+    @Operation(summary="Writes match judgement for a given evidence UID associated with a given job and criterion (node) UID")
+    @PostMapping("/evidence_relevance")
     public @ResponseBody
     Boolean writeEvidenceRelevance(Authentication authentication,
                                    @RequestParam(name = "job_uid") UUID jobUID,
@@ -134,6 +145,8 @@ public class CohortController {
         }
     }
 
+    @Operation(summary="Gets match judgement (if present), or algorithmicly determined judgement for all nodes " +
+            "of the Criterion associated with the given job UID")
     @GetMapping("/criterion_match_status")
     public @ResponseBody
     Map<String, CriterionInfo> getCriterionMatchStatus(Authentication authentication,
@@ -146,6 +159,7 @@ public class CohortController {
         }
     }
 
+    @Operation(summary="Writes criterion match judgement for the given job and criterion (node) UID")
     @PostMapping("/criterion_match_status")
     public @ResponseBody
     Map<String, CriterionInfo> setCriterionMatchStatus(Authentication authentication,
@@ -157,6 +171,21 @@ public class CohortController {
         } catch (Throwable e) {
             // TODO log the Exception
             throw new RuntimeException("Error occurred on cohort retrieval result retrieve");
+        }
+    }
+
+
+    @Operation(summary="Gets the revision of a criterion associated with a given job UID. ",
+            description="Note that for projects, the associated method under /_projects should be called instead using project UID as a parameter " +
+            "as the criterion associated with a prior job may be different from the latest revision being edited")
+    @GetMapping("/criterion")
+    public @ResponseBody
+    Criterion getJobCriterion(Authentication authentication, @RequestParam(name="job_uid") UUID uid) {
+        try {
+            return storage.getJobCriterion(authentication, uid);
+        } catch (Throwable e) {
+            // TODO log the IOException
+            throw new RuntimeException("Error occurred on project rename");
         }
     }
 }

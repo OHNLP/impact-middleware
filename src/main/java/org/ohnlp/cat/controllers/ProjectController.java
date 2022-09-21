@@ -1,5 +1,7 @@
 package org.ohnlp.cat.controllers;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.ohnlp.cat.api.criteria.Criterion;
 import org.ohnlp.cat.api.projects.Project;
 import org.ohnlp.cat.api.projects.ProjectRole;
@@ -12,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 
+@Tag(name="Project Controller", description="Operations relating to Project Creation and Management")
 @Controller
 @RequestMapping("/_projects")
 public class ProjectController {
@@ -23,6 +26,7 @@ public class ProjectController {
         this.storage = storage;
     }
 
+    @Operation(summary="Gets listing of projects to which the calling user has read access")
     @GetMapping("/")
     public @ResponseBody
     List<Project> getProjectList(Authentication authentication) {
@@ -34,6 +38,7 @@ public class ProjectController {
         }
     }
 
+    @Operation(summary="Creates a new project with the given name with the calling user set to owner")
     @PutMapping("/create")
     public @ResponseBody
     Project createProject(Authentication authentication, @RequestParam(name="name") String projectName) {
@@ -45,6 +50,7 @@ public class ProjectController {
         }
     }
 
+    @Operation(summary="Renames the project associated with the given project UID to the given name")
     @PostMapping("/rename")
     public @ResponseBody
     Project renameProject(Authentication authentication, @RequestParam(name="project_name") String projectName, @RequestParam(name="project_uid") UUID uid) {
@@ -56,6 +62,7 @@ public class ProjectController {
         }
     }
 
+    @Operation(summary="Sets the given project authority/role grant")
     @PostMapping("/roles")
     public @ResponseBody
     Boolean setUserRole(Authentication authentication, @RequestBody ProjectRole roleDef) {
@@ -67,6 +74,7 @@ public class ProjectController {
         }
     }
 
+    @Operation(summary="Archives the project associated with the given project UID")
     @DeleteMapping("/archive")
     public @ResponseBody
     Boolean archiveProject(Authentication authentication, @RequestParam(name="project_uid") UUID uid) {
@@ -78,6 +86,9 @@ public class ProjectController {
         }
     }
 
+    @Operation(summary="Gets the current (latest) revision of a criterion associated with a given project UID. ",
+            description="Note that for jobs, the associated method under /_cohorts should be called instead using job UID as a parameter " +
+            "as the criterion associated with a prior job may be different from the latest revision")
     @GetMapping("/criterion")
     public @ResponseBody
     Criterion getProjectCriterion(Authentication authentication, @RequestParam(name="project_uid") UUID uid) {
@@ -89,6 +100,7 @@ public class ProjectController {
         }
     }
 
+    @Operation(summary="Updates the criterion associated with a given project UID")
     @PostMapping("/criterion")
     public @ResponseBody
     Boolean writeProjectCriterion(Authentication authentication, @RequestParam(name="project_uid") UUID uid, @RequestBody Criterion criterion) {
