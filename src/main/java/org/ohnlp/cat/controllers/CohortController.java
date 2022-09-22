@@ -150,24 +150,26 @@ public class CohortController {
     @GetMapping("/criterion_match_status")
     public @ResponseBody
     Map<String, CriterionInfo> getCriterionMatchStatus(Authentication authentication,
-                                                       @RequestParam(name = "job_uid") UUID jobUID) {
+                                                       @RequestParam(name = "job_uid") UUID jobUID,
+                                                       @RequestParam(name = "person_uid") String personUID) {
         try {
-            return storage.getCriterionMatchStatus(authentication, jobUID);
+            return storage.getCriterionMatchStatus(authentication, jobUID, personUID);
         } catch (Throwable e) {
             // TODO log the Exception
             throw new RuntimeException("Error occurred on cohort retrieval result retrieve");
         }
     }
 
-    @Operation(summary="Writes criterion match judgement for the given job and criterion (node) UID")
+    @Operation(summary="Writes criterion match judgement for the given job, person, and criterion (node) UID")
     @PostMapping("/criterion_match_status")
     public @ResponseBody
     Map<String, CriterionInfo> setCriterionMatchStatus(Authentication authentication,
                                                         @RequestParam(name = "job_uid") UUID jobUID,
                                                         @RequestParam(name = "node_uid") UUID nodeUID,
+                                                        @RequestParam(name = "person_uid") String personUID,
                                                         @RequestBody CriterionInfo judgement) {
         try {
-            return storage.setCriterionMatchStatus(authentication, jobUID, nodeUID, judgement);
+            return storage.setCriterionMatchStatus(authentication, jobUID, nodeUID, personUID, judgement);
         } catch (Throwable e) {
             // TODO log the Exception
             throw new RuntimeException("Error occurred on cohort retrieval result retrieve");

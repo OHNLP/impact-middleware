@@ -305,7 +305,7 @@ public class JDBCBackedStorage {
         }
     }
 
-    public Map<String, CriterionInfo> getCriterionMatchStatus(Authentication authentication, UUID jobUID) throws IOException {
+    public Map<String, CriterionInfo> getCriterionMatchStatus(Authentication authentication, UUID jobUID, String personUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
                 PreparedStatement ps = conn.prepareStatement(
@@ -330,10 +330,11 @@ public class JDBCBackedStorage {
                         CriterionInfo nodeJudgement = new CriterionInfo();
                         // Check for a node-level judgement first. If there is one, override everything
                         PreparedStatement nodeRetrieval = conn.prepareStatement(
-                                "SELECT nr.judgement, nr.comment FROM NODE_RELEVANCE nr WHERE nr.job_uid = ? AND nr.judger_uid = ? AND AND nr.node_uid = ?");
+                                "SELECT nr.judgement, nr.comment FROM NODE_RELEVANCE nr WHERE nr.job_uid = ? AND person_uid = ? AND nr.judger_uid = ? AND nr.node_uid = ?");
                         nodeRetrieval.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
-                        nodeRetrieval.setString(2, userIdForAuth(authentication));
-                        nodeRetrieval.setString(3, node_uid.toUpperCase(Locale.ROOT));
+                        nodeRetrieval.setString(2, personUID);
+                        nodeRetrieval.setString(3, userIdForAuth(authentication));
+                        nodeRetrieval.setString(4, node_uid.toUpperCase(Locale.ROOT));
                         ResultSet rs2 = nodeRetrieval.executeQuery();
                         if (rs2.next()) {
                             String judgement = rs2.getString("judgement");
@@ -410,20 +411,22 @@ public class JDBCBackedStorage {
     }
 
 
-    public Map<String, CriterionInfo> setCriterionMatchStatus(Authentication authentication, UUID jobUID, UUID nodeUID, CriterionInfo judgement) throws IOException {
+    public Map<String, CriterionInfo> setCriterionMatchStatus(Authentication authentication, UUID jobUID, UUID nodeUID, String personUID, CriterionInfo judgement) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
-                PreparedStatement ps = conn.prepareStatement("UPDATE cat.NODE_RELEVANCE SET judgement = ?, comment = ? WHERE node_uid = ? AND judger_uid = ?");
+                PreparedStatement ps = conn.prepareStatement("UPDATE cat.NODE_RELEVANCE SET judgement = ?, comment = ? WHERE node_uid = ? AND person_uid = ? AND judger_uid = ? ");
                 ps.setString(1, judgement.getJudgement() == null ? null : judgement.getJudgement().name());
                 ps.setString(2, judgement.getComment());
                 ps.setString(3, nodeUID.toString().toUpperCase(Locale.ROOT));
-                ps.setString(4, userIdForAuth(authentication));
+                ps.setString(4, personUID);
+                ps.setString(5, userIdForAuth(authentication));
                 if (ps.executeUpdate() == 0) { // No preexisting row
-                    ps = conn.prepareStatement("INSERT INTO cat.NODE_RELEVANCE (node_uid, judger_uid, judgement, comment) VALUES (?, ?, ?, ?)");
+                    ps = conn.prepareStatement("INSERT INTO cat.NODE_RELEVANCE (node_uid, person_uid, judger_uid, judgement, comment) VALUES (?, ?, ?, ?, ?)");
                     ps.setString(1, nodeUID.toString().toUpperCase(Locale.ROOT));
-                    ps.setString(2, userIdForAuth(authentication));
-                    ps.setString(3, judgement.getJudgement() == null ? null : judgement.getJudgement().name());
-                    ps.setString(4, judgement.getComment());
+                    ps.setString(2, personUID);
+                    ps.setString(3, userIdForAuth(authentication));
+                    ps.setString(4, judgement.getJudgement() == null ? null : judgement.getJudgement().name());
+                    ps.setString(5, judgement.getComment());
                     ps.executeUpdate();
                 }
             } else {
@@ -433,7 +436,7 @@ public class JDBCBackedStorage {
             e.printStackTrace(); // TODO log exceptions to DB
             throw new IOException("Error on current criterion status write", e);
         }
-        return getCriterionMatchStatus(authentication, jobUID);
+        return getCriterionMatchStatus(authentication, jobUID, personUID);
     }
 
     public Criterion getJobCriterion(Authentication authentication, UUID jobUID) throws IOException {
