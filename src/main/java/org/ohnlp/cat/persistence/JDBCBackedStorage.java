@@ -362,10 +362,10 @@ public class JDBCBackedStorage {
                         // First, determine if there is a user judgement overriding default algorithmic matches
                         while (rs2.next()) {
                             found = true;
-                            if (!rs.getBoolean("nlp_flag")) {
+                            if (!rs2.getBoolean("nlp_flag")) {
                                 nonNLPFound = true;
                             }
-                            String judgement = rs.getString("judgement");
+                            String judgement = rs2.getString("judgement");
                             if (judgement != null) {
                                 CriterionJudgement parsedJudgement = CriterionJudgement.valueOf(judgement);
                                 if (evidenceJudgementState.compareTo(parsedJudgement) > 0) { // Lower priority than the parsed judgement
