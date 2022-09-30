@@ -1,0 +1,19 @@
+cat:
+  applicationURL: https://localhost:8123
+  jobExecutorClass: org.ohnlp.cat.executors.FlinkExecutor
+  persistence:
+    url:
+    user:
+    pwd:
+    driver-class:
+  ldap:
+    enabled: false
+    ldap-url: ldap://your-ldap-url
+    bind-patterns:
+      - CN={0},pattern1
+      - CN={0},pattern2
+flink:
+  upload-jar-from-local: false
+  job-manager-uri: http://localhost:6123
+  backend-jar-path: ./CAT-backend.jar
+  job-parallelism: 48
