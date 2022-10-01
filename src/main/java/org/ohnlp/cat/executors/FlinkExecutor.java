@@ -17,6 +17,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 
+import javax.annotation.PreDestroy;
 import java.io.File;
 import java.util.Locale;
 import java.util.UUID;
@@ -74,6 +75,13 @@ public class FlinkExecutor implements JobExecutor {
             throw new Exception("Job Start on Flink Cluster Failed!");
         } else {
             return job.get("jobid").asText();
+        }
+    }
+
+    @PreDestroy
+    public void destroy() {
+        if (config.uploadJarFromLocal) {
+            this.flink.delete("/jars/" + backendFlinkJarUID);
         }
     }
 
