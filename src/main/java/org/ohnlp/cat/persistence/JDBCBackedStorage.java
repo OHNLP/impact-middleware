@@ -749,6 +749,9 @@ public class JDBCBackedStorage {
 
 
     private boolean checkUserAuthority(Connection conn, UUID projectUID, Authentication authentication, ProjectAuthorityGrant minGrant) throws SQLException {
+        if (userIdForAuth(authentication).equals(config.getBackendCallbackUsername().toUpperCase(Locale.ROOT))) {
+            return true;
+        }
         PreparedStatement ps = conn.prepareStatement("SELECT grant_type FROM cat.project_role_grants WHERE project_uid = ? AND user_uid = ?");
         ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
         ps.setString(2, userIdForAuth(authentication));

@@ -10,6 +10,16 @@ import java.util.List;
 @ConfigurationProperties(prefix="cat")
 public class ApplicationConfiguration {
 
+    private String backendCallbackUsername;
+
+    public String getBackendCallbackUsername() {
+        return backendCallbackUsername;
+    }
+
+    public void setBackendCallbackUsername(String backendCallbackUsername) {
+        this.backendCallbackUsername = backendCallbackUsername;
+    }
+
     private String applicationURL;
 
     public String getApplicationURL() {
