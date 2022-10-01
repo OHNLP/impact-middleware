@@ -63,7 +63,7 @@ public class FlinkExecutor implements JobExecutor {
     @Override
     public String startJob(UUID jobUID, Criterion criterion, String callbackURL) throws Exception {
         ObjectNode requestBody = JsonNodeFactory.instance.objectNode();
-        requestBody.put("entry-class", "org.ohnlp.ir.cat.CohortIdentificationJob");
+        requestBody.put("entryClass", "org.ohnlp.ir.cat.CohortIdentificationJob");
         String[] opts = {
                 "--runner=FlinkRunner",
                 "--callback=" + callbackURL,
