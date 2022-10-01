@@ -33,7 +33,7 @@ public class FlinkExecutor implements JobExecutor {
     public FlinkExecutor(ExecutorConfig config) {
         this.config = config;
         this.flink = new RestTemplate();
-        flink.setUriTemplateHandler(new DefaultUriBuilderFactory(config.jobManagerURI));
+        flink.setUriTemplateHandler(new DefaultUriBuilderFactory(config.restEndpointURI));
         if (config.uploadJarFromLocal) {
             backendFlinkJarUID = uploadJobJar();
         } else {
@@ -80,18 +80,18 @@ public class FlinkExecutor implements JobExecutor {
     @Configuration
     @ConfigurationProperties("flink")
     public static class ExecutorConfig {
-        private String jobManagerURI;
+        private String restEndpointURI;
         private boolean uploadJarFromLocal;
         private String jarUID;
         private String backendJarPath;
         private int jobParallelism;
 
-        public String getJobManagerURI() {
-            return jobManagerURI;
+        public String getRestEndpointURI() {
+            return restEndpointURI;
         }
 
-        public void setJobManagerURI(String jobManagerURI) {
-            this.jobManagerURI = jobManagerURI;
+        public void setRestEndpointURI(String restEndpointURI) {
+            this.restEndpointURI = restEndpointURI;
         }
 
         public boolean isUploadJarFromLocal() {

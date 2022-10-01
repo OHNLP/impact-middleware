@@ -1,4 +1,4 @@
-cat:
+0cat:
   applicationURL: https://localhost:8123
   jobExecutorClass: org.ohnlp.cat.executors.FlinkExecutor
   persistence:
@@ -14,6 +14,6 @@ cat:
       - CN={0},pattern2
 flink:
   upload-jar-from-local: false
-  job-manager-uri: http://localhost:6123
   backend-jar-path: ./CAT-backend.jar
   job-parallelism: 48
+  rest-endpoint-uri: http://localhost:8081/v1
