@@ -1,6 +1,7 @@
 package org.ohnlp.cat.executors;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.ohnlp.cat.api.criteria.Criterion;
@@ -62,13 +63,17 @@ public class FlinkExecutor implements JobExecutor {
     @Override
     public String startJob(UUID jobUID, Criterion criterion, String callbackURL) throws Exception {
         ObjectNode requestBody = JsonNodeFactory.instance.objectNode();
-        requestBody.put("entryClass", "org.ohnlp.ir.cat.CohortIdentificationJob");
-        requestBody.put("programArg", String.join(",",
-                        "--runner=FlinkRunner",
-                        "--callback=" + callbackURL,
-                        "--jobid=" + jobUID.toString().toLowerCase(Locale.ROOT)
-                )
-        );
+        requestBody.put("entry-class", "org.ohnlp.ir.cat.CohortIdentificationJob");
+        String[] opts = {
+                "--runner=FlinkRunner",
+                "--callback=" + callbackURL,
+                "--jobid=" + jobUID.toString().toLowerCase(Locale.ROOT)
+        };
+        ArrayNode argArr = JsonNodeFactory.instance.arrayNode(3);
+        for (String s : opts) {
+            argArr.add(s);
+        }
+        requestBody.set("programArgsList", argArr);
         requestBody.put("parallelism", config.getJobParallelism());
         JsonNode job = flink.postForObject("/jars/" + backendFlinkJarUID + "/run", requestBody, JsonNode.class);
         if (job == null || !job.has("jobid")) {
