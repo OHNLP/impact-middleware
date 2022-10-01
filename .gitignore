@@ -33,4 +33,4 @@ build/
 .vscode/
 
 ### Site-Local Application Configuration (for In-IDE Development Testing) ###
-src/main/resources/application.properties
+src/main/resources/application.yml
