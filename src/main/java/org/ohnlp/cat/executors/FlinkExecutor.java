@@ -44,7 +44,6 @@ public class FlinkExecutor implements JobExecutor {
     private String uploadJobJar() {
         // Upload the JAR to cluster. Flink requires the application/x-java-archive header
         HttpHeaders headers = new HttpHeaders();
-//        headers.setContentType(new MediaType("application", "x-java-archive"));
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
         MultiValueMap<String, Object> body
                 = new LinkedMultiValueMap<>();
@@ -52,7 +51,8 @@ public class FlinkExecutor implements JobExecutor {
         HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
         JsonNode jarInfo = this.flink.postForObject("/jars/upload", requestEntity, JsonNode.class);
         if (jarInfo != null && jarInfo.has("filename")) {
-            return jarInfo.get("filename").asText(); // filename is the JAR ID for flink API calls
+            String filename =  jarInfo.get("filename").asText(); // filename is the JAR ID for flink API calls
+            return filename.substring(filename.lastIndexOf("/") + 1);
         } else {
             throw new IllegalArgumentException("Job Jar Upload to Flink Cluster Failed!");
         }
