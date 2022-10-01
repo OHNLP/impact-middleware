@@ -130,7 +130,7 @@ public class JDBCBackedStorage {
                 updateRoles.setString(2, role.getProjectUID().toString().toUpperCase(Locale.ROOT));
                 updateRoles.setString(3, role.getUserUID().toUpperCase(Locale.ROOT)); // TODO handle checking if user exists in system
                 if (updateRoles.executeUpdate() < 1) { // No preexisting role for user on project
-                    PreparedStatement insertRoles = conn.prepareStatement("INSERT INTO PROJECT_ROLE_GRANTS (project_uid, user_uid, grant_type) VALUES (?, ?, ?)");
+                    PreparedStatement insertRoles = conn.prepareStatement("INSERT INTO cat.PROJECT_ROLE_GRANTS (project_uid, user_uid, grant_type) VALUES (?, ?, ?)");
                     insertRoles.setString(1, role.getProjectUID().toString().toUpperCase(Locale.ROOT));
                     insertRoles.setString(2, role.getUserUID().toUpperCase(Locale.ROOT)); // TODO handle checking if user exists in system
                     insertRoles.setString(3, role.getGrant().name()); //
@@ -205,7 +205,7 @@ public class JDBCBackedStorage {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
                 PreparedStatement ps = conn.prepareStatement(
-                        "SELECT c.patient_uid, c.score, j.judgement " +
+                        "SELECT c.person_uid, c.score, j.judgement " +
                                 "FROM (SELECT * FROM cat.COHORT WHERE job_uid = ?) c LEFT JOIN (SELECT * FROM cat.COHORT_RELEVANCE WHERE judger_uid = ?) j" +
                                 "     ON c.row_uid = j.cohort_row_uid ORDER BY c.score DESC");
                 ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
@@ -240,7 +240,7 @@ public class JDBCBackedStorage {
                 PreparedStatement ps = conn.prepareStatement("SELECT judgement " +
                         "FROM cat.COHORT c " +
                         "JOIN cat.COHORT_RELEVANCE cr ON c.row_uid = cr.cohort_row_uid " +
-                        "WHERE c.job_uid = ? AND c.patient_uid = ? AND cr.judger_uid = ?");
+                        "WHERE c.job_uid = ? AND c.person_uid = ? AND cr.judger_uid = ?");
                 for (String patientUID : patientUIDs) { // Do one-by-one search because not all JDBC drivers support IN clauses...
                     ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
                     ps.setString(2, patientUID);
@@ -263,14 +263,14 @@ public class JDBCBackedStorage {
     }
 
     public boolean writeCohortJudgement(Authentication authentication, UUID jobUID,
-                                     String patId, CandidateInclusion inclusion) throws IOException {
+                                        String patId, CandidateInclusion inclusion) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
                 // Manually check exists instead of using MERGE because not all SQL dialects support it
                 PreparedStatement checkExists = conn.prepareStatement(
-                        "SELECT c.row_id, cr.row_id AS JUDGEMENT_ROW, cr.judgement FROM cat.COHORT c " +
-                                "LEFT JOIN cat.COHORT_RELEVANCE cr ON c.row_id = cr.cohort_row_uid AND cr.judger_uid = ?" +
-                                "WHERE c.job_uid = ? AND c.patient_uid = ?");
+                        "SELECT c.row_uid, cr.row_uid AS JUDGEMENT_ROW, cr.judgement FROM cat.COHORT c " +
+                                "LEFT JOIN cat.COHORT_RELEVANCE cr ON c.row_uid = cr.cohort_row_uid AND cr.judger_uid = ?" +
+                                "WHERE c.job_uid = ? AND c.person_uid = ?");
                 checkExists.setString(1, userIdForAuth(authentication));
                 checkExists.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
                 checkExists.setString(3, patId);
@@ -310,8 +310,8 @@ public class JDBCBackedStorage {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
                 PreparedStatement ps = conn.prepareStatement(
                         "SELECT pc.criterion " +
-                                "FROM AUDIT_LOG al " +
-                                "JOIN PROJECT_CRITERION pc ON al.criterion_uid = pc.row_uid " +
+                                "FROM cat.AUDIT_LOG al " +
+                                "JOIN cat.PROJECT_CRITERION pc ON al.criterion_uid = pc.row_uid " +
                                 "WHERE al.job_uid = ?"
                 );
                 ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
@@ -330,7 +330,7 @@ public class JDBCBackedStorage {
                         CriterionInfo nodeJudgement = new CriterionInfo();
                         // Check for a node-level judgement first. If there is one, override everything
                         PreparedStatement nodeRetrieval = conn.prepareStatement(
-                                "SELECT nr.judgement, nr.comment FROM NODE_RELEVANCE nr WHERE nr.job_uid = ? AND person_uid = ? AND nr.judger_uid = ? AND nr.node_uid = ?");
+                                "SELECT nr.judgement, nr.user_comment FROM cat.NODE_RELEVANCE nr WHERE nr.job_uid = ? AND person_uid = ? AND nr.judger_uid = ? AND nr.node_uid = ?");
                         nodeRetrieval.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
                         nodeRetrieval.setString(2, personUID);
                         nodeRetrieval.setString(3, userIdForAuth(authentication));
@@ -348,9 +348,9 @@ public class JDBCBackedStorage {
                             judgements.put(node_uid, nodeJudgement);
                         }
                         PreparedStatement evidenceRetrieval = conn.prepareStatement(
-                                "SELECT DISTINCT e.evidence_uid, e.nlp_flag, er.judgement FROM cat.EVIDENCE e " +
-                                        "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.node_uid = er.node_uid AND er.judger_uid = ?" +
-                                        "WHERE e.job_uid = ? AND e.criterion_uid = ?");
+                                "SELECT DISTINCT e.evidence_uid, er.judgement FROM cat.EVIDENCE e " +
+                                        "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid AND er.judger_uid = ?" +
+                                        "WHERE e.job_uid = ? AND e.node_uid = ?");
                         evidenceRetrieval.setString(1, userIdForAuth(authentication));
                         evidenceRetrieval.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
                         evidenceRetrieval.setString(3, node_uid.toUpperCase(Locale.ROOT));
@@ -414,14 +414,14 @@ public class JDBCBackedStorage {
     public Map<String, CriterionInfo> setCriterionMatchStatus(Authentication authentication, UUID jobUID, UUID nodeUID, String personUID, CriterionInfo judgement) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
-                PreparedStatement ps = conn.prepareStatement("UPDATE cat.NODE_RELEVANCE SET judgement = ?, comment = ? WHERE node_uid = ? AND person_uid = ? AND judger_uid = ? ");
+                PreparedStatement ps = conn.prepareStatement("UPDATE cat.NODE_RELEVANCE SET judgement = ?, user_comment = ? WHERE node_uid = ? AND person_uid = ? AND judger_uid = ? ");
                 ps.setString(1, judgement.getJudgement() == null ? null : judgement.getJudgement().name());
                 ps.setString(2, judgement.getComment());
                 ps.setString(3, nodeUID.toString().toUpperCase(Locale.ROOT));
                 ps.setString(4, personUID);
                 ps.setString(5, userIdForAuth(authentication));
                 if (ps.executeUpdate() == 0) { // No preexisting row
-                    ps = conn.prepareStatement("INSERT INTO cat.NODE_RELEVANCE (node_uid, person_uid, judger_uid, judgement, comment) VALUES (?, ?, ?, ?, ?)");
+                    ps = conn.prepareStatement("INSERT INTO cat.NODE_RELEVANCE (node_uid, person_uid, judger_uid, judgement, user_comment) VALUES (?, ?, ?, ?, ?)");
                     ps.setString(1, nodeUID.toString().toUpperCase(Locale.ROOT));
                     ps.setString(2, personUID);
                     ps.setString(3, userIdForAuth(authentication));
@@ -442,7 +442,7 @@ public class JDBCBackedStorage {
     public Criterion getJobCriterion(Authentication authentication, UUID jobUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
-                PreparedStatement ps = conn.prepareStatement("SELECT criterion FROM cat.AUDIT a WHERE job_uid = ?");
+                PreparedStatement ps = conn.prepareStatement("SELECT c.criterion FROM cat.AUDIT_LOG a JOIN cat.PROJECT_CRITERION c ON a.criterion_uid = c.row_uid WHERE job_uid = ?");
                 ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
                 ResultSet rs = ps.executeQuery();
                 if (rs.next()) {
@@ -493,8 +493,8 @@ public class JDBCBackedStorage {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
                 // Manually check exists instead of using MERGE because not all SQL dialects support it
                 PreparedStatement checkExists = conn.prepareStatement(
-                        "SELECT e.row_id, er.row_id AS JUDGEMENT_ROW, er.judgement FROM cat.EVIDENCE e " +
-                                "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_id = er.evidence_row_uid AND er.judger_uid = ?" +
+                        "SELECT e.row_uid, er.row_uid AS JUDGEMENT_ROW, er.judgement FROM cat.EVIDENCE e " +
+                                "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid AND er.judger_uid = ?" +
                                 "WHERE e.job_uid = ? AND e.node_uid = ? AND e.evidence_uid = ? ");
                 checkExists.setString(1, userIdForAuth(authentication));
                 checkExists.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
@@ -564,19 +564,20 @@ public class JDBCBackedStorage {
         try (Connection conn = this.datasource.getConnection()) {
             // No need to check user authority to read own jobs
             List<Job> ret = new ArrayList<>();
-                PreparedStatement ps = conn.prepareStatement(
-                        "SELECT job_uid, project_uid, start_date, user_uid, job_status FROM cat.AUDIT_LOG WHERE user_uid = ? AND archived = 0 ORDER BY start_date DESC");
-                ps.setString(1, userIdForAuth(authentication));
-                ResultSet rs = ps.executeQuery();
-                while (rs.next()) {
-                    Job info = new Job();
-                    info.setProjectUID(UUID.fromString(rs.getString("project_uid")));
-                    info.setStartDate(rs.getTimestamp("start_date"));
-                    info.setStatus(JobStatus.forCode(rs.getInt("job_status")));
-                    info.setJobUID(UUID.fromString(rs.getString("job_uid")));
-                    ret.add(info);
-                }
-                return ret;
+            PreparedStatement ps = conn.prepareStatement(
+                    "SELECT job_uid, project_uid, start_dtm, user_uid, job_status " +
+                            "FROM cat.AUDIT_LOG WHERE user_uid = ? AND archived = 0 ORDER BY start_dtm DESC");
+            ps.setString(1, userIdForAuth(authentication));
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                Job info = new Job();
+                info.setProjectUID(UUID.fromString(rs.getString("project_uid")));
+                info.setStartDate(rs.getTimestamp("start_date"));
+                info.setStatus(JobStatus.forCode(rs.getInt("job_status")));
+                info.setJobUID(UUID.fromString(rs.getString("job_uid")));
+                ret.add(info);
+            }
+            return ret;
 
         } catch (Throwable e) {
             e.printStackTrace(); // TODO log exceptions to DB
@@ -589,7 +590,8 @@ public class JDBCBackedStorage {
             List<Job> ret = new ArrayList<>();
             if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.READ)) {
                 PreparedStatement ps = conn.prepareStatement(
-                        "SELECT job_uid, start_date, user_uid, job_status FROM cat.AUDIT_LOG WHERE project_uid = ? AND archived = 0 ORDER BY start_date DESC");
+                        "SELECT job_uid, start_dtm, user_uid, job_status FROM cat.AUDIT_LOG " +
+                                "WHERE project_uid = ? AND archived = 0 ORDER BY start_dtm DESC");
                 ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
                 ResultSet rs = ps.executeQuery();
                 while (rs.next()) {
@@ -630,7 +632,7 @@ public class JDBCBackedStorage {
                 // Create the audit record first so that if the executor starts right away it has information to retrieve
                 UUID jobUID = UUID.randomUUID();
                 long jobTimestamp = System.currentTimeMillis();
-                ps = conn.prepareStatement("INSERT INTO cat.AUDIT_LOG (project_uid, job_uid, criterion_uid, user_uid, start_date, job_status) VALUES (?, ?, ?, ?, ?, ?)");
+                ps = conn.prepareStatement("INSERT INTO cat.AUDIT_LOG (project_uid, job_uid, criterion_uid, user_uid, start_dtm, job_status) VALUES (?, ?, ?, ?, ?, ?)");
                 ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
                 ps.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
                 ps.setLong(3, criterionRowID);
@@ -674,7 +676,7 @@ public class JDBCBackedStorage {
     public boolean setJobStatus(Authentication authentication, UUID jobUID, JobStatus status) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.EXECUTE)) {
-                PreparedStatement ps = conn.prepareStatement("UPDATE AUDIT_LOG SET job_status = ? WHERE job_uid = ?");
+                PreparedStatement ps = conn.prepareStatement("UPDATE cat.AUDIT_LOG SET job_status = ? WHERE job_uid = ?");
                 ps.setInt(1, status.getCode());
                 ps.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
                 return ps.executeUpdate() > 0;
@@ -690,7 +692,7 @@ public class JDBCBackedStorage {
     public boolean cancelJobRecord(Authentication authentication, UUID jobUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.EXECUTE)) {
-                PreparedStatement ps = conn.prepareStatement("UPDATE AUDIT_LOG SET job_status = -2 WHERE job_uid = ? AND job_status NOT IN (3, -1)");
+                PreparedStatement ps = conn.prepareStatement("UPDATE cat.AUDIT_LOG SET job_status = -2 WHERE job_uid = ? AND job_status NOT IN (3, -1)");
                 ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
                 return ps.executeUpdate() > 0;
             } else {
@@ -705,7 +707,7 @@ public class JDBCBackedStorage {
     public boolean archiveJobRecord(Authentication authentication, UUID jobUID) throws IOException {
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.WRITE)) {
-                PreparedStatement ps = conn.prepareStatement("UPDATE AUDIT_LOG SET archived = 1 WHERE job_uid = ? AND job_status IN (3, -1)");
+                PreparedStatement ps = conn.prepareStatement("UPDATE cat.AUDIT_LOG SET archived = 1 WHERE job_uid = ? AND job_status IN (3, -1)");
                 ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
                 return ps.executeUpdate() > 0;
             } else {

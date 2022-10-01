@@ -7,6 +7,7 @@ import org.ohnlp.cat.api.criteria.Criterion;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -43,10 +44,11 @@ public class FlinkExecutor implements JobExecutor {
     private String uploadJobJar() {
         // Upload the JAR to cluster. Flink requires the application/x-java-archive header
         HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(new MediaType("application", "x-java-archive"));
+//        headers.setContentType(new MediaType("application", "x-java-archive"));
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
         MultiValueMap<String, Object> body
                 = new LinkedMultiValueMap<>();
-        body.add("file", new File(config.backendJarPath));
+        body.add("file", new FileSystemResource(new File(config.backendJarPath)));
         HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
         JsonNode jarInfo = this.flink.postForObject("/jars/upload", requestEntity, JsonNode.class);
         if (jarInfo != null && jarInfo.has("filename")) {
