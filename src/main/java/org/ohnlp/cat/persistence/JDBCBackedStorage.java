@@ -568,13 +568,13 @@ public class JDBCBackedStorage {
             List<Job> ret = new ArrayList<>();
             PreparedStatement ps = conn.prepareStatement(
                     "SELECT job_uid, project_uid, start_dtm, user_uid, job_status " +
-                            "FROM cat.AUDIT_LOG WHERE user_uid = ? AND archived = 0 ORDER BY start_dtm DESC");
+                            "FROM cat.AUDIT_LOG WHERE user_uid = ? AND archived != 1 ORDER BY start_dtm DESC");
             ps.setString(1, userIdForAuth(authentication));
             ResultSet rs = ps.executeQuery();
             while (rs.next()) {
                 Job info = new Job();
                 info.setProjectUID(UUID.fromString(rs.getString("project_uid")));
-                info.setStartDate(rs.getTimestamp("start_date"));
+                info.setStartDate(rs.getTimestamp("start_dtm"));
                 info.setStatus(JobStatus.forCode(rs.getInt("job_status")));
                 info.setJobUID(UUID.fromString(rs.getString("job_uid")));
                 ret.add(info);
@@ -593,13 +593,13 @@ public class JDBCBackedStorage {
             if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.READ)) {
                 PreparedStatement ps = conn.prepareStatement(
                         "SELECT job_uid, start_dtm, user_uid, job_status FROM cat.AUDIT_LOG " +
-                                "WHERE project_uid = ? AND archived = 0 ORDER BY start_dtm DESC");
+                                "WHERE project_uid = ? AND archived != 1 ORDER BY start_dtm DESC");
                 ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
                 ResultSet rs = ps.executeQuery();
                 while (rs.next()) {
                     Job info = new Job();
                     info.setProjectUID(projectUID);
-                    info.setStartDate(rs.getTimestamp("start_date"));
+                    info.setStartDate(rs.getTimestamp("start_dtm"));
                     info.setStatus(JobStatus.forCode(rs.getInt("job_status")));
                     info.setJobUID(UUID.fromString(rs.getString("job_uid")));
                     ret.add(info);
