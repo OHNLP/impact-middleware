@@ -276,7 +276,7 @@ public class JDBCBackedStorage {
                 checkExists.setString(3, patId);
                 ResultSet rs = checkExists.executeQuery();
                 if (rs.next()) {
-                    long rowUID = rs.getLong("row_id");
+                    long rowUID = rs.getLong("row_uid");
                     if (rs.getString("judgement") != null) { // preexisting relevance
                         PreparedStatement ps = conn.prepareStatement(
                                 "UPDATE cat.COHORT_RELEVANCE " +
@@ -497,7 +497,7 @@ public class JDBCBackedStorage {
                 checkExists.setString(4, evidenceUID);
                 ResultSet rs = checkExists.executeQuery();
                 if (rs.next()) {
-                    long rowUID = rs.getLong("row_id");
+                    long rowUID = rs.getLong("row_uid");
                     if (rs.getString("judgement") != null) { // preexisting relevance
                         PreparedStatement ps = conn.prepareStatement(
                                 "UPDATE cat.EVIDENCE_RELEVANCE " +
