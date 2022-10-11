@@ -214,7 +214,7 @@ public class JDBCBackedStorage {
                 ResultSet rs = ps.executeQuery();
                 while (rs.next()) {
                     CohortCandidate next = new CohortCandidate();
-                    next.setPatUID(rs.getString("patient_uid"));
+                    next.setPatUID(rs.getString("person_uid"));
                     String jgmt = rs.getString("judgement");
                     if (jgmt != null) {
                         next.setInclusion(CandidateInclusion.valueOf(jgmt.toUpperCase(Locale.ROOT)));
@@ -350,21 +350,18 @@ public class JDBCBackedStorage {
                         PreparedStatement evidenceRetrieval = conn.prepareStatement(
                                 "SELECT DISTINCT e.evidence_uid, er.judgement FROM cat.EVIDENCE e " +
                                         "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid AND er.judger_uid = ?" +
-                                        "WHERE e.job_uid = ? AND e.node_uid = ?");
+                                        "WHERE e.job_uid = ? AND e.node_uid = ? AND e.person_uid = ?");
                         evidenceRetrieval.setString(1, userIdForAuth(authentication));
                         evidenceRetrieval.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
                         evidenceRetrieval.setString(3, node_uid.toUpperCase(Locale.ROOT));
+                        evidenceRetrieval.setString(4, personUID);
 
                         rs2 = evidenceRetrieval.executeQuery();
                         boolean found = false;
-                        boolean nonNLPFound = false;
                         CriterionJudgement evidenceJudgementState = CriterionJudgement.NO_EVIDENCE_FOUND;
                         // First, determine if there is a user judgement overriding default algorithmic matches
                         while (rs2.next()) {
                             found = true;
-                            if (!rs2.getBoolean("nlp_flag")) {
-                                nonNLPFound = true;
-                            }
                             String judgement = rs2.getString("judgement");
                             if (judgement != null) {
                                 CriterionJudgement parsedJudgement = CriterionJudgement.valueOf(judgement);
@@ -375,11 +372,7 @@ public class JDBCBackedStorage {
                         }
                         // Now adjust if there are no user judgements but there is evidence
                         if (found && (evidenceJudgementState.equals(CriterionJudgement.NO_EVIDENCE_FOUND))) {
-                            if (!nonNLPFound) {
-                                evidenceJudgementState = CriterionJudgement.EVIDENCE_FOUND;
-                            } else {
-                                evidenceJudgementState = CriterionJudgement.EVIDENCE_FOUND_NLP;
-                            }
+                            evidenceJudgementState = CriterionJudgement.EVIDENCE_FOUND;
                         }
                         rs2.close();
                         nodeJudgement.setJudgement(evidenceJudgementState);
@@ -496,7 +489,7 @@ public class JDBCBackedStorage {
                 // Manually check exists instead of using MERGE because not all SQL dialects support it
                 PreparedStatement checkExists = conn.prepareStatement(
                         "SELECT e.row_uid, er.row_uid AS JUDGEMENT_ROW, er.judgement FROM cat.EVIDENCE e " +
-                                "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid AND er.judger_uid = ?" +
+                                "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid AND er.judger_uid = ? " +
                                 "WHERE e.job_uid = ? AND e.node_uid = ? AND e.evidence_uid = ? ");
                 checkExists.setString(1, userIdForAuth(authentication));
                 checkExists.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
