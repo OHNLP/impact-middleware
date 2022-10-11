@@ -5,6 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
 import java.util.List;
+import java.util.Map;
 
 @Configuration
 @ConfigurationProperties(prefix="cat")
@@ -58,6 +59,16 @@ public class ApplicationConfiguration {
 
     public void setLdap(LDAPConfig ldap) {
         this.ldap = ldap;
+    }
+
+    public Map<String, EvidenceProviderConfig> evidenceProviders;
+
+    public Map<String, EvidenceProviderConfig> getEvidenceProviders() {
+        return evidenceProviders;
+    }
+
+    public void setEvidenceProviders(Map<String, EvidenceProviderConfig> evidenceProviders) {
+        this.evidenceProviders = evidenceProviders;
     }
 
     public static class Persistence {
@@ -127,6 +138,69 @@ public class ApplicationConfiguration {
 
         public void setBindPatterns(List<String> bindPatterns) {
             this.bindPatterns = bindPatterns;
+        }
+    }
+
+    public static class EvidenceProviderConfig {
+        private ProviderConfig provider;
+        private ConnectionConfig connection;
+
+        public ProviderConfig getProvider() {
+            return provider;
+        }
+
+        public void setProvider(ProviderConfig provider) {
+            this.provider = provider;
+        }
+
+        public ConnectionConfig getConnection() {
+            return connection;
+        }
+
+        public void setConnection(ConnectionConfig connection) {
+            this.connection = connection;
+        }
+
+        public static class ProviderConfig {
+            private String clazz;
+            private Map<String, Object> config;
+
+            public String getClazz() {
+                return clazz;
+            }
+
+            public void setClazz(String clazz) {
+                this.clazz = clazz;
+            }
+
+            public Map<String, Object> getConfig() {
+                return config;
+            }
+
+            public void setConfig(Map<String, Object> config) {
+                this.config = config;
+            }
+        }
+
+        public static class ConnectionConfig {
+            private String url;
+            private String driverClass;
+
+            public String getUrl() {
+                return url;
+            }
+
+            public void setUrl(String url) {
+                this.url = url;
+            }
+
+            public String getDriverClass() {
+                return driverClass;
+            }
+
+            public void setDriverClass(String driverClass) {
+                this.driverClass = driverClass;
+            }
         }
     }
 }

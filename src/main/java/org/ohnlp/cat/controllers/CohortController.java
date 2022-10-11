@@ -1,12 +1,11 @@
 package org.ohnlp.cat.controllers;
 
-import io.swagger.v3.oas.annotations.Hidden;
+import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.hl7.fhir.r4.model.DomainResource;
 import org.ohnlp.cat.api.cohorts.CandidateInclusion;
 import org.ohnlp.cat.api.cohorts.CohortCandidate;
-import org.ohnlp.cat.api.criteria.ClinicalEntityType;
 import org.ohnlp.cat.api.criteria.Criterion;
 import org.ohnlp.cat.api.criteria.CriterionInfo;
 import org.ohnlp.cat.api.criteria.CriterionJudgement;
@@ -26,11 +25,12 @@ import java.util.*;
 public class CohortController {
 
     private final JDBCBackedStorage storage;
-    private EvidenceProvider evidenceProvider = new EvidenceProvider(); // TODO autowire
+    private final EvidenceProvider evidenceProvider;
 
     @Autowired
-    public CohortController(JDBCBackedStorage storage) {
+    public CohortController(JDBCBackedStorage storage, EvidenceProvider evidenceProvider) {
         this.storage = storage;
+        this.evidenceProvider = evidenceProvider;
     }
 
 
@@ -196,8 +196,9 @@ public class CohortController {
 
     @Operation(summary = "Gets the FHIR resources associated with a given set of evidence UIDs")
     @GetMapping("/evidencebyuid")
-    Map<String, DomainResource> getEvidenceByUID(@RequestParam(name = "evidenceUID") String... evidenceUIDs) {
-        Map<String, DomainResource> ret = new HashMap<>();
+    @ResponseBody
+    Map<String, JsonNode> getEvidenceByUID(@RequestParam(name = "evidenceUID") String... evidenceUIDs) {
+        Map<String, JsonNode> ret = new HashMap<>();
         for (String evidenceUID : evidenceUIDs) {
             ret.put(evidenceUID, evidenceProvider.getEvidenceForUID(evidenceUID));
         }
