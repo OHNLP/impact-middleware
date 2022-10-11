@@ -341,11 +341,12 @@ public class JDBCBackedStorage {
                             if (judgement != null) {
                                 nodeJudgement.setJudgement(CriterionJudgement.valueOf(judgement));
                             }
-                            nodeJudgement.setComment(rs2.getString("comment"));
+                            nodeJudgement.setComment(rs2.getString("user_comment"));
                         }
                         rs2.close();
                         if (nodeJudgement.getJudgement() != null) {
                             judgements.put(node_uid, nodeJudgement);
+                            return;
                         }
                         PreparedStatement evidenceRetrieval = conn.prepareStatement(
                                 "SELECT DISTINCT e.evidence_uid, er.judgement FROM cat.EVIDENCE e " +
