@@ -325,12 +325,16 @@ public class JDBCBackedStorage {
                 Set<String> nodeUIDs = new HashSet<>();
                 recursSearchNodeUIDsFromDef(def, nodeUIDs);
                 Map<String, CriterionInfo> judgements = new HashMap<>();
+                PreparedStatement nodeRetrieval = conn.prepareStatement(
+                        "SELECT nr.judgement, nr.user_comment FROM cat.NODE_RELEVANCE nr WHERE nr.job_uid = ? AND nr.node_uid = ? AND person_uid = ? AND nr.judger_uid = ? ");
+                PreparedStatement evidenceRetrieval = conn.prepareStatement(
+                        "SELECT DISTINCT e.evidence_uid, er.judgement FROM cat.EVIDENCE e " +
+                                "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid AND er.judger_uid = ? " +
+                                "WHERE e.job_uid = ? AND e.node_uid = ? AND e.person_uid = ?");
                 nodeUIDs.forEach(node_uid -> {
                     try {
                         CriterionInfo nodeJudgement = new CriterionInfo();
                         // Check for a node-level judgement first. If there is one, override everything
-                        PreparedStatement nodeRetrieval = conn.prepareStatement(
-                                "SELECT nr.judgement, nr.user_comment FROM cat.NODE_RELEVANCE nr WHERE nr.job_uid = ? AND nr.node_uid = ? AND person_uid = ? AND nr.judger_uid = ? ");
                         nodeRetrieval.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
                         nodeRetrieval.setString(2, node_uid.toUpperCase(Locale.ROOT));
                         nodeRetrieval.setString(3, personUID);
@@ -348,10 +352,6 @@ public class JDBCBackedStorage {
                             judgements.put(node_uid, nodeJudgement);
                             return;
                         }
-                        PreparedStatement evidenceRetrieval = conn.prepareStatement(
-                                "SELECT DISTINCT e.evidence_uid, er.judgement FROM cat.EVIDENCE e " +
-                                        "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid AND er.judger_uid = ?" +
-                                        "WHERE e.job_uid = ? AND e.node_uid = ? AND e.person_uid = ?");
                         evidenceRetrieval.setString(1, userIdForAuth(authentication));
                         evidenceRetrieval.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
                         evidenceRetrieval.setString(3, node_uid.toUpperCase(Locale.ROOT));

@@ -68,10 +68,13 @@ public class EvidenceProvider {
     }
 
     public JsonNode getEvidenceForUID(String evidenceUID) {
+        if (evidenceUID.split(":").length < 3) {
+            evidenceUID = "ehr:" + evidenceUID; // Legacy handling
+        }
         // First parse out actual evidence ID/type
         String id = evidenceUID;
         String providerID = id.substring(0, id.indexOf(":"));
-        id = id.substring(id.indexOf(":")) + 1;
+        id = id.substring(id.indexOf(":") + 1);
         ClinicalEntityType type = ClinicalEntityType.valueOf(id.substring(0, id.indexOf(":")));
         id = id.substring(id.indexOf(":") + 1);
         String basePS;
@@ -95,6 +98,8 @@ public class EvidenceProvider {
                     Object val = rs.getObject(fieldName);
                     if (beamSchema.getField(fieldName).getType().getTypeName().isDateType()) {
                         values.add(DateTime.parse(val.toString()));
+                    } else if (beamSchema.getField(fieldName).getType().getTypeName().equals(Schema.TypeName.FLOAT)) {
+                        values.add(Float.parseFloat(rs.getObject(fieldName) + "")); // Handle some oddities with downward conversions
                     } else {
                         values.add(rs.getObject(fieldName));
                     }
