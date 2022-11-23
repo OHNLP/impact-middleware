@@ -2,6 +2,7 @@ package org.ohnlp.cat.controllers;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.ohnlp.cat.api.ehr.DataSourceInformation;
 import org.ohnlp.cat.api.jobs.Job;
 import org.ohnlp.cat.persistence.JDBCBackedStorage;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -87,6 +88,18 @@ public class JobController {
         } catch (Throwable e) {
             // TODO log the IOException
             throw new RuntimeException("Error occurred on job creation");
+        }
+    }
+
+    @Operation(summary="Gets a listing of data sources currently used for a given job UID")
+    @GetMapping("/data_sources")
+    public @ResponseBody
+    List<DataSourceInformation> getDataSources(Authentication authentication, @RequestParam(name="job_uid") UUID uid) {
+        try {
+            return storage.getProjectDataSourcesByJobUID(authentication, uid);
+        } catch (Throwable e) {
+            // TODO log the IOException
+            throw new RuntimeException("Error occurred on project data source retrieve");
         }
     }
 

@@ -1,5 +1,6 @@
 package org.ohnlp.cat;
 
+import org.ohnlp.cat.api.ehr.DataSourceInformation;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
@@ -69,6 +70,16 @@ public class ApplicationConfiguration {
 
     public void setEvidenceProviders(Map<String, EvidenceProviderConfig> evidenceProviders) {
         this.evidenceProviders = evidenceProviders;
+    }
+
+    public List<DataSourceInformation> dataSources;
+
+    public List<DataSourceInformation> getDataSources() {
+        return dataSources;
+    }
+
+    public void setDataSources(List<DataSourceInformation> dataSources) {
+        this.dataSources = dataSources;
     }
 
     public static class Persistence {
