@@ -1,6 +1,5 @@
 cat:
   applicationURL: https://localhost:8123
-  backendCallbackUsername:
   jobExecutorClass: org.ohnlp.cat.executors.FlinkExecutor
   persistence:
     url:
@@ -13,6 +12,18 @@ cat:
     bind-patterns:
       - CN={0},pattern1
       - CN={0},pattern2
+  evidence-providers:
+    provider_uid_1:
+      provider:
+        clazz:
+        config:
+      connection:
+        url:
+        driver-class:
+  data-sources:
+    - name: Resource Provider 1
+      description: Example resource provider 1
+      backend-ID: provider_uid_1
 flink:
   upload-jar-from-local: false
   backend-jar-path: ./CAT-backend.jar
