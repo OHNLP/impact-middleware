@@ -1,6 +1,7 @@
 cat:
   applicationURL: https://localhost:8123
   jobExecutorClass: org.ohnlp.cat.executors.FlinkExecutor
+  backendCallbackUsername:
   persistence:
     url:
     user:
