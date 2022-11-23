@@ -2,7 +2,9 @@ package org.ohnlp.cat.controllers;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.ohnlp.cat.ApplicationConfiguration;
 import org.ohnlp.cat.api.criteria.Criterion;
+import org.ohnlp.cat.api.ehr.DataSourceInformation;
 import org.ohnlp.cat.api.projects.Project;
 import org.ohnlp.cat.api.projects.ProjectRole;
 import org.ohnlp.cat.persistence.JDBCBackedStorage;
@@ -20,10 +22,12 @@ import java.util.UUID;
 public class ProjectController {
 
     private final JDBCBackedStorage storage;
+    private final ApplicationConfiguration config;
 
     @Autowired
-    public ProjectController(JDBCBackedStorage storage) {
+    public ProjectController(JDBCBackedStorage storage, ApplicationConfiguration config) {
         this.storage = storage;
+        this.config = config;
     }
 
     @Operation(summary="Gets listing of projects to which the calling user has read access")
@@ -109,6 +113,38 @@ public class ProjectController {
         } catch (Throwable e) {
             // TODO log the IOException
             throw new RuntimeException("Error occurred on project rename");
+        }
+    }
+
+    @Operation(summary="Gets a listing of available data sources")
+    @GetMapping("/available_data_sources")
+    public @ResponseBody
+    List<DataSourceInformation> getAvailableDataSources() {
+        return config.getDataSources();
+    }
+
+    @Operation(summary="Gets a listing of data sources currently used for a given project UID")
+    @GetMapping("/data_sources")
+    public @ResponseBody
+    List<DataSourceInformation> getDataSources(Authentication authentication, @RequestParam(name="project_uid") UUID uid) {
+        try {
+            return storage.getProjectDataSources(authentication, uid);
+        } catch (Throwable e) {
+            // TODO log the IOException
+            throw new RuntimeException("Error occurred on project data source retrieve");
+        }
+    }
+
+    @Operation(summary="Updates list of data sources associated with a given project")
+    @PostMapping("/data_sources")
+    public @ResponseBody
+    Boolean writeDataSources(Authentication authentication, @RequestParam(name="project_uid") UUID uid,
+                           @RequestBody List<DataSourceInformation> dataSources) {
+        try {
+            return storage.writeProjectDataSources(authentication, uid, dataSources);
+        } catch (Throwable e) {
+            // TODO log the IOException
+            throw new RuntimeException("Error occurred on project data source write");
         }
     }
 }

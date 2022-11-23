@@ -1,12 +1,14 @@
 package org.ohnlp.cat.persistence;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mchange.v2.c3p0.ComboPooledDataSource;
 import org.ohnlp.cat.ApplicationConfiguration;
 import org.ohnlp.cat.api.cohorts.CandidateInclusion;
 import org.ohnlp.cat.api.cohorts.CohortCandidate;
 import org.ohnlp.cat.api.criteria.*;
+import org.ohnlp.cat.api.ehr.DataSourceInformation;
 import org.ohnlp.cat.api.evidence.Evidence;
 import org.ohnlp.cat.api.jobs.Job;
 import org.ohnlp.cat.api.jobs.JobStatus;
@@ -196,6 +198,46 @@ public class JDBCBackedStorage {
         } catch (SQLException e) {
             e.printStackTrace(); // TODO log exceptions to DB
             throw new IOException("Error on project criteria write", e);
+        }
+    }
+
+    public List<DataSourceInformation> getProjectDataSources(Authentication authentication, UUID projectUID) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.READ)) {
+                PreparedStatement ps = conn.prepareStatement("SELECT data_sources FROM cat.project_data_sources WHERE project_uid = ?");
+                ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
+                ResultSet rs = ps.executeQuery();
+                rs.next();
+                return om.get().readValue(rs.getString("data_source"), new TypeReference<>() {});
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.READ.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on project data sources read", e);
+        }
+    }
+
+    public boolean writeProjectDataSources(Authentication authentication, UUID projectUID, List<DataSourceInformation> dataSources) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.WRITE)) {
+                // Try update first
+                PreparedStatement updateRoles = conn.prepareStatement("UPDATE cat.project_data_sources SET data_sources = ? WHERE project_uid = ?");
+                updateRoles.setString(1, om.get().writeValueAsString(dataSources));
+                updateRoles.setString(2, projectUID.toString().toUpperCase(Locale.ROOT));
+                if (updateRoles.executeUpdate() < 1) { // No preexisting role for user on project
+                    PreparedStatement insertRoles = conn.prepareStatement("INSERT INTO cat.project_data_sources (project_uid, data_sources) VALUES (?, ?)");
+                    insertRoles.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
+                    insertRoles.setString(2,  om.get().writeValueAsString(dataSources));
+                    insertRoles.executeUpdate();
+                }
+                return true;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.WRITE.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on project data sources write", e);
         }
     }
 
@@ -449,6 +491,23 @@ public class JDBCBackedStorage {
         } catch (SQLException | JsonProcessingException e) {
             e.printStackTrace(); // TODO log exceptions to DB
             throw new IOException("Error on project criteria retrieve", e);
+        }
+    }
+    public List<DataSourceInformation> getProjectDataSourcesByJobUID(Authentication authentication, UUID jobUID) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            UUID projectUID = getProjectUIDForJob(conn, jobUID);
+            if (checkUserAuthority(conn, projectUID, authentication, ProjectAuthorityGrant.READ)) {
+                PreparedStatement ps = conn.prepareStatement("SELECT data_sources FROM cat.project_data_sources WHERE project_uid = ?");
+                ps.setString(1, projectUID.toString().toUpperCase(Locale.ROOT));
+                ResultSet rs = ps.executeQuery();
+                rs.next();
+                return om.get().readValue(rs.getString("data_source"), new TypeReference<>() {});
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.READ.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on project data sources read", e);
         }
     }
 
