@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.sql.*;
 import java.util.*;
 import java.util.Date;
+import java.util.concurrent.ConcurrentHashMap;
 
 // TODO permissions checks for all functions?
 @Component
@@ -348,6 +349,8 @@ public class JDBCBackedStorage {
     }
 
     public Map<String, CriterionInfo> getCriterionMatchStatus(Authentication authentication, UUID jobUID, String personUID) throws IOException {
+        Set<String> nodeUIDs = new HashSet<>();
+        Map<String, CriterionInfo> judgements = new ConcurrentHashMap<>();
         try (Connection conn = this.datasource.getConnection()) {
             if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.READ)) {
                 PreparedStatement ps = conn.prepareStatement(
@@ -364,67 +367,8 @@ public class JDBCBackedStorage {
                 } else {
                     throw new IllegalStateException("No definition stored for job");
                 }
-                Set<String> nodeUIDs = new HashSet<>();
-                recursSearchNodeUIDsFromDef(def, nodeUIDs);
-                Map<String, CriterionInfo> judgements = new HashMap<>();
-                PreparedStatement nodeRetrieval = conn.prepareStatement(
-                        "SELECT nr.judgement, nr.user_comment FROM cat.NODE_RELEVANCE nr WHERE nr.job_uid = ? AND nr.node_uid = ? AND person_uid = ? AND nr.judger_uid = ? ");
-                PreparedStatement evidenceRetrieval = conn.prepareStatement(
-                        "SELECT DISTINCT e.evidence_uid, er.judgement FROM cat.EVIDENCE e " +
-                                "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid AND er.judger_uid = ? " +
-                                "WHERE e.job_uid = ? AND e.node_uid = ? AND e.person_uid = ?");
-                nodeUIDs.forEach(node_uid -> {
-                    try {
-                        CriterionInfo nodeJudgement = new CriterionInfo();
-                        // Check for a node-level judgement first. If there is one, override everything
-                        nodeRetrieval.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
-                        nodeRetrieval.setString(2, node_uid.toUpperCase(Locale.ROOT));
-                        nodeRetrieval.setString(3, personUID);
-                        nodeRetrieval.setString(4, userIdForAuth(authentication));
-                        ResultSet rs2 = nodeRetrieval.executeQuery();
-                        if (rs2.next()) {
-                            String judgement = rs2.getString("judgement");
-                            if (judgement != null) {
-                                nodeJudgement.setJudgement(CriterionJudgement.valueOf(judgement));
-                            }
-                            nodeJudgement.setComment(rs2.getString("user_comment"));
-                        }
-                        rs2.close();
-                        if (nodeJudgement.getJudgement() != null) {
-                            judgements.put(node_uid, nodeJudgement);
-                            return;
-                        }
-                        evidenceRetrieval.setString(1, userIdForAuth(authentication));
-                        evidenceRetrieval.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
-                        evidenceRetrieval.setString(3, node_uid.toUpperCase(Locale.ROOT));
-                        evidenceRetrieval.setString(4, personUID);
 
-                        rs2 = evidenceRetrieval.executeQuery();
-                        boolean found = false;
-                        CriterionJudgement evidenceJudgementState = CriterionJudgement.NO_EVIDENCE_FOUND;
-                        // First, determine if there is a user judgement overriding default algorithmic matches
-                        while (rs2.next()) {
-                            found = true;
-                            String judgement = rs2.getString("judgement");
-                            if (judgement != null) {
-                                CriterionJudgement parsedJudgement = CriterionJudgement.valueOf(judgement);
-                                if (evidenceJudgementState.compareTo(parsedJudgement) > 0) { // Lower priority than the parsed judgement
-                                    evidenceJudgementState = parsedJudgement;
-                                }
-                            }
-                        }
-                        // Now adjust if there are no user judgements but there is evidence
-                        if (found && (evidenceJudgementState.equals(CriterionJudgement.NO_EVIDENCE_FOUND))) {
-                            evidenceJudgementState = CriterionJudgement.EVIDENCE_FOUND;
-                        }
-                        rs2.close();
-                        nodeJudgement.setJudgement(evidenceJudgementState);
-                        judgements.put(node_uid, nodeJudgement);
-                    } catch (SQLException e) {
-                        throw new RuntimeException("Error retrieving evidence judgement states", e);
-                    }
-                });
-                return judgements;
+                recursSearchNodeUIDsFromDef(def, nodeUIDs);
             } else {
                 throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.READ.name());
             }
@@ -432,6 +376,64 @@ public class JDBCBackedStorage {
             e.printStackTrace(); // TODO log exceptions to DB
             throw new IOException("Error on current criterion status retrieval", e);
         }
+        nodeUIDs.parallelStream().forEach(node_uid -> {
+            try (Connection conn = this.datasource.getConnection()){
+                PreparedStatement nodeRetrieval = conn.prepareStatement(
+                        "SELECT nr.judgement, nr.user_comment FROM cat.NODE_RELEVANCE nr WHERE nr.job_uid = ? AND nr.node_uid = ? AND person_uid = ? AND nr.judger_uid = ? ");
+                PreparedStatement evidenceRetrieval = conn.prepareStatement(
+                        "SELECT DISTINCT e.evidence_uid, er.judgement FROM cat.EVIDENCE e " +
+                                "LEFT JOIN cat.EVIDENCE_RELEVANCE er ON e.row_uid = er.evidence_row_uid AND er.judger_uid = ? " +
+                                "WHERE e.job_uid = ? AND e.node_uid = ? AND e.person_uid = ?");
+                CriterionInfo nodeJudgement = new CriterionInfo();
+                // Check for a node-level judgement first. If there is one, override everything
+                nodeRetrieval.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                nodeRetrieval.setString(2, node_uid.toUpperCase(Locale.ROOT));
+                nodeRetrieval.setString(3, personUID);
+                nodeRetrieval.setString(4, userIdForAuth(authentication));
+                ResultSet rs2 = nodeRetrieval.executeQuery();
+                if (rs2.next()) {
+                    String judgement = rs2.getString("judgement");
+                    if (judgement != null) {
+                        nodeJudgement.setJudgement(CriterionJudgement.valueOf(judgement));
+                    }
+                    nodeJudgement.setComment(rs2.getString("user_comment"));
+                }
+                rs2.close();
+                if (nodeJudgement.getJudgement() != null) {
+                    judgements.put(node_uid, nodeJudgement);
+                    return;
+                }
+                evidenceRetrieval.setString(1, userIdForAuth(authentication));
+                evidenceRetrieval.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
+                evidenceRetrieval.setString(3, node_uid.toUpperCase(Locale.ROOT));
+                evidenceRetrieval.setString(4, personUID);
+
+                rs2 = evidenceRetrieval.executeQuery();
+                boolean found = false;
+                CriterionJudgement evidenceJudgementState = CriterionJudgement.NO_EVIDENCE_FOUND;
+                // First, determine if there is a user judgement overriding default algorithmic matches
+                while (rs2.next()) {
+                    found = true;
+                    String judgement = rs2.getString("judgement");
+                    if (judgement != null) {
+                        CriterionJudgement parsedJudgement = CriterionJudgement.valueOf(judgement);
+                        if (evidenceJudgementState.compareTo(parsedJudgement) > 0) { // Lower priority than the parsed judgement
+                            evidenceJudgementState = parsedJudgement;
+                        }
+                    }
+                }
+                // Now adjust if there are no user judgements but there is evidence
+                if (found && (evidenceJudgementState.equals(CriterionJudgement.NO_EVIDENCE_FOUND))) {
+                    evidenceJudgementState = CriterionJudgement.EVIDENCE_FOUND;
+                }
+                rs2.close();
+                nodeJudgement.setJudgement(evidenceJudgementState);
+                judgements.put(node_uid, nodeJudgement);
+            } catch (SQLException e) {
+                throw new RuntimeException("Error retrieving evidence judgement states", e);
+            }
+        });
+        return judgements;
     }
 
     private void recursSearchNodeUIDsFromDef(Criterion def, Set<String> nodeUIDs) {
