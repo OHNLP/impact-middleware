@@ -13,6 +13,13 @@
     <version>0.0.1-SNAPSHOT</version>
     <name>cat-middleware</name>
     <description>cat-middleware</description>
+    <repositories>
+        <repository>
+            <id>medtagger</id>
+            <name>OHNLP MedTagger Apache Maven Packages</name>
+            <url>https://maven.pkg.github.com/OHNLP/MedTagger</url>
+        </repository>
+    </repositories>
     <properties>
         <java.version>11</java.version>
     </properties>
@@ -73,6 +80,12 @@
             <version>1.3.1</version>
         </dependency>
 
+        <!-- Text Representation Parsing -->
+        <dependency>
+            <groupId>org.ohnlp.medtagger</groupId>
+            <artifactId>medtagger</artifactId>
+            <version>1.0.49</version>
+        </dependency>
 
         <!-- Documentation -->
         <dependency>
