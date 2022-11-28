@@ -82,6 +82,16 @@ public class ApplicationConfiguration {
         this.dataSources = dataSources;
     }
 
+    public List<RepresentationResolverConfig> representationResolvers;
+
+    public List<RepresentationResolverConfig> getRepresentationResolvers() {
+        return representationResolvers;
+    }
+
+    public void setRepresentationResolvers(List<RepresentationResolverConfig> representationResolvers) {
+        this.representationResolvers = representationResolvers;
+    }
+
     public static class Persistence {
         private String url;
         private String user;
@@ -212,6 +222,36 @@ public class ApplicationConfiguration {
             public void setDriverClass(String driverClass) {
                 this.driverClass = driverClass;
             }
+        }
+    }
+
+    public static class RepresentationResolverConfig {
+        private String id;
+        private String resolverClass;
+        private Map<String, Object> config;
+
+        public String getId() {
+            return id;
+        }
+
+        public void setId(String id) {
+            this.id = id;
+        }
+
+        public String getResolverClass() {
+            return resolverClass;
+        }
+
+        public void setResolverClass(String resolverClass) {
+            this.resolverClass = resolverClass;
+        }
+
+        public Map<String, Object> getConfig() {
+            return config;
+        }
+
+        public void setConfig(Map<String, Object> config) {
+            this.config = config;
         }
     }
 }
