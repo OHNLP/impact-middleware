@@ -36,16 +36,14 @@ public class TextResolutionService {
         }
     }
 
-    public Map<String, Map<String, Map<String, Collection<DataSourceRepresentation>>>> getDataSourceRepresentations(String in, ClinicalEntityType type, List<String> dataSourceIDs) {
+    public Collection<DataSourceRepresentation> getDataSourceRepresentations(String in, ClinicalEntityType type, List<String> dataSourceIDs) {
         Set<String> umls = parseToUMLS(in);
-        Map<String, Map<String, Map<String, Collection<DataSourceRepresentation>>>> ret = new HashMap<>();
+        HashSet<DataSourceRepresentation> ret = new HashSet<>();
         for (String dataSourceID : dataSourceIDs) {
-            ret.computeIfAbsent(dataSourceID, k -> new HashMap<>());
             for (String cui : umls) {
                 Map<String, UMLSDataSourceRepresentationResolver> representations = this.representationResolvers.getResolversForDataSource(dataSourceID);
                 representations.forEach((name, resolver) -> {
-                    ret.get(dataSourceID).computeIfAbsent(name, k -> new HashMap<>())
-                            .computeIfAbsent(cui, k -> new HashSet<>()).addAll(resolver.resolveForUMLS(type, dataSourceID, cui));
+                    ret.addAll(resolver.resolveForUMLS(type, dataSourceID, cui));
                 });
             }
         }

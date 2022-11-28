@@ -34,7 +34,7 @@ public class TextResolutionController {
     // TODO nicer return representation
     @GetMapping("/representations")
     public @ResponseBody
-    Map<String, Map<String, Map<String, Collection<DataSourceRepresentation>>>> getRepresentationsForText(
+    Collection<DataSourceRepresentation> getRepresentationsForText(
             Authentication authentication,
             @RequestParam(name="project_uid") UUID uid,
             @RequestParam(name="text") String text,
