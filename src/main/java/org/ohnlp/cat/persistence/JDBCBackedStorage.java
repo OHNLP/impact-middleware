@@ -5,6 +5,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mchange.v2.c3p0.ComboPooledDataSource;
 import org.ohnlp.cat.ApplicationConfiguration;
+import org.ohnlp.cat.api.adjudication.CohortAdjudicationStatus;
+import org.ohnlp.cat.api.adjudication.PatientAdjudicationStatus;
 import org.ohnlp.cat.api.cohorts.CandidateInclusion;
 import org.ohnlp.cat.api.cohorts.CohortCandidate;
 import org.ohnlp.cat.api.criteria.*;
@@ -774,6 +776,177 @@ public class JDBCBackedStorage {
             e.printStackTrace(); // TODO log exceptions to DB
             throw new IOException("Error on job archive", e);
         }
+    }
+
+    // ===== Adjudication Related Methods =====/
+    public Map<String, CohortAdjudicationStatus> getCohortAdjudicationState(Authentication auth, UUID jobUID) throws IOException {
+        Map<String, CohortAdjudicationStatus> ret = new LinkedHashMap<>();
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), auth, ProjectAuthorityGrant.WRITE)) {
+                PreparedStatement ps = conn.prepareStatement(
+                        "WITH PATS AS (SELECT row_uid, person_uid, score FROM cat.COHORT WHERE job_uid = ?), " +
+                                "     COHORT_REL_GROUPED AS (SELECT cohort_row_uid, judgement, count(*) AS cnt FROM cat.COHORT_RELEVANCE GROUP BY cohort_row_uid, judgement), " +
+                                "     OVERRIDES AS (SELECT cohort_row_uid, judgment FROM cat.COHORT_RELEVANCE_ADJUDICATIONS) " +
+                                "SELECT p.person_uid, c.judgement, c.cnt, o.judgment AS override FROM PATS p " +
+                                "LEFT JOIN COHORT_REL_GROUPED c ON p.row_uid = c.cohort_row_uid " +
+                                "LEFT JOIN OVERRIDES o ON o.cohort_row_uid = p.row_uid " +
+                                "ORDER BY p.score DESC");
+                ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    String personID = rs.getString("person_uid");
+                    ret.computeIfAbsent(personID, k -> {
+                        CohortAdjudicationStatus status = new CohortAdjudicationStatus();
+                        status.setStatus(new HashMap<>());
+                        return status;
+                    });
+                    String jdgmt = rs.getString("judgement");
+                    // If no judgements, we set adjudication to 0 after
+                    if (jdgmt != null) {
+                        ret.get(personID).getStatus().put(CandidateInclusion.valueOf(jdgmt), rs.getInt("cnt"));
+                    }
+                    String override = rs.getString("override");
+                    if (override != null) {
+                        ret.get(personID).setTiebreakerOverride(CandidateInclusion.valueOf(override));
+                    }
+                }
+                ret.forEach((pat_uid, status) -> {
+                    status.setNumAdjudicators(status.getStatus().values().stream().reduce(Integer::sum).orElse(0));
+                });
+                return ret;
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.READ.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on job cohort adjudication", e);
+        }
+    }
+
+    public Map<String, CohortAdjudicationStatus> setAdjudicationOverrideCohort(Authentication authentication, UUID jobUID, String personUID, CandidateInclusion status) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
+                // Get the cohort row id
+                PreparedStatement ps = conn.prepareStatement("SELECT row_uid FROM cat.COHORT WHERE job_uid = ?");
+                ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                ResultSet rs = ps.executeQuery();
+                int row_uid = -1;
+                if (rs.next()) {
+                    row_uid = rs.getInt(1);
+                } else {
+                    throw new RuntimeException("Person UID " + personUID + " not found in cohort for job " + jobUID);
+                }
+                ps = conn.prepareStatement("UPDATE cat.COHORT_RELEVANCE_ADJUDICATIONS SET judgement = ? WHERE cohort_row_uid = ?");
+                ps.setString(1, status.name());
+                ps.setInt(2, row_uid);
+                if (ps.executeUpdate() == 0) { // No preexisting row
+                    ps = conn.prepareStatement("INSERT INTO cat.COHORT_RELEVANCE_ADJUDICATIONS (cohort_row_uid, judgement) VALUES (?, ?)");
+                    ps.setInt(1, row_uid);
+                    ps.setString(2, status.name());
+                    ps.executeUpdate();
+                }
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.JUDGE.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on setting cohort adjudication state", e);
+        }
+        return getCohortAdjudicationState(authentication, jobUID);
+    }
+
+    public Map<String, PatientAdjudicationStatus> getCriteriaAdjudicationState(Authentication auth, UUID jobUID, String personUID) throws IOException {
+        Set<String> nodeUIDs = new HashSet<>();
+        Map<String, PatientAdjudicationStatus> judgements = new ConcurrentHashMap<>();
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), auth, ProjectAuthorityGrant.JUDGE)) {
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT pc.criterion " +
+                                "FROM cat.AUDIT_LOG al " +
+                                "JOIN cat.PROJECT_CRITERION pc ON al.criterion_uid = pc.row_uid " +
+                                "WHERE al.job_uid = ?"
+                );
+                ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                ResultSet rs = ps.executeQuery();
+                Criterion def;
+                if (rs.next()) {
+                    def = om.get().readValue(rs.getString("criterion"), Criterion.class);
+                } else {
+                    throw new IllegalStateException("No definition stored for job");
+                }
+
+                recursSearchNodeUIDsFromDef(def, nodeUIDs);
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.READ.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on current criterion status retrieval", e);
+        }
+        nodeUIDs.parallelStream().forEach(node_uid -> {
+            try (Connection conn = this.datasource.getConnection()){
+                PreparedStatement nodeRetrieval = conn.prepareStatement(
+                        "SELECT nr.judgement, nr.user_comment FROM cat.NODE_RELEVANCE nr WHERE nr.job_uid = ? AND nr.node_uid = ? AND person_uid = ?");
+                // Check for a node-level judgement first. If there is one, override everything
+                nodeRetrieval.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                nodeRetrieval.setString(2, node_uid.toUpperCase(Locale.ROOT));
+                nodeRetrieval.setString(3, personUID);
+                ResultSet rs2 = nodeRetrieval.executeQuery();
+                Map<CriterionJudgement, Integer> counts = new HashMap<>();
+                while (rs2.next()) {
+                    String judgement = rs2.getString("judgement");
+                    counts.merge(CriterionJudgement.valueOf(judgement), 1, Integer::sum);
+                }
+                rs2.close();
+                PreparedStatement overrideRetrieval = conn.prepareStatement("SELECT judgement FROM cat.NODE_RELEVANCE_OVERRIDE WHERE job_uid = ? AND node_uid = ? AND person_uid = ?");
+                overrideRetrieval.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                overrideRetrieval.setString(2, node_uid.toUpperCase(Locale.ROOT));
+                overrideRetrieval.setString(3, personUID);
+                rs2 = overrideRetrieval.executeQuery();
+                CriterionJudgement override = rs2.next() ? CriterionJudgement.valueOf(rs2.getString("judgement")) : null;
+                rs2.close();
+                judgements.computeIfAbsent(node_uid, k -> {
+                    PatientAdjudicationStatus status = new PatientAdjudicationStatus();
+                    status.setStatus(counts);
+                    status.setNumAdjudicators(counts.values().stream().reduce(Integer::sum).orElse(0));
+                    if (override != null) {
+                        status.setTiebreakerOverride(override);
+                    }
+                    return status;
+                });
+            } catch (SQLException e) {
+                throw new RuntimeException("Error retrieving evidence judgement states", e);
+            }
+        });
+        return judgements;
+    }
+
+
+    public Map<String, PatientAdjudicationStatus> setAdjudicationOverrideCriterion(Authentication authentication, UUID jobUID, UUID nodeUID, String personUID, CriterionJudgement status) throws IOException {
+        try (Connection conn = this.datasource.getConnection()) {
+            if (checkUserAuthority(conn, getProjectUIDForJob(conn, jobUID), authentication, ProjectAuthorityGrant.JUDGE)) {
+                // Get the cohort row id
+                PreparedStatement ps = conn.prepareStatement("UPDATE cat.NODE_RELEVANCE_ADJUDICATIONS SET judgement = ? WHERE job_uid = ? AND node_uid = ? AND person_uid = ?");
+                ps.setString(1, status.name());
+                ps.setString(2, jobUID.toString().toUpperCase(Locale.ROOT));
+                ps.setString(3, nodeUID.toString().toUpperCase(Locale.ROOT));
+                ps.setString(4, personUID);
+                if (ps.executeUpdate() == 0) { // No preexisting row
+                    ps = conn.prepareStatement("INSERT INTO cat.NODE_RELEVANCE_ADJUDICATIONS (job_uid, node_uid, person_uid, judgement) VALUES (?, ?, ?, ?)");
+                    ps.setString(1, jobUID.toString().toUpperCase(Locale.ROOT));
+                    ps.setString(2, nodeUID.toString().toUpperCase(Locale.ROOT));
+                    ps.setString(3, personUID);
+                    ps.setString(4, status.name());
+                    ps.executeUpdate();
+                }
+            } else {
+                throw new IllegalAccessException("User does not have the required role " + ProjectAuthorityGrant.JUDGE.name());
+            }
+        } catch (Throwable e) {
+            e.printStackTrace(); // TODO log exceptions to DB
+            throw new IOException("Error on setting cohort adjudication state", e);
+        }
+        return getCriteriaAdjudicationState(authentication, jobUID, personUID);
     }
 
     // ===== Utility/Service/Non-Returning Methods =====/
