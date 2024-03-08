@@ -96,6 +96,7 @@ public class ApplicationConfiguration {
         private String url;
         private String user;
         private String pwd;
+        private String schema;
         private String driverClass;
 
         public String getUrl() {
@@ -120,6 +121,14 @@ public class ApplicationConfiguration {
 
         public void setPwd(String pwd) {
             this.pwd = pwd;
+        }
+
+        public String getSchema() {
+            return schema;
+        }
+
+        public void setSchema(String schema) {
+            this.schema = schema;
         }
 
         public String getDriverClass() {

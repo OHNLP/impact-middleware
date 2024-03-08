@@ -6,6 +6,7 @@ cat:
     url:
     user:
     pwd:
+    schema:
     driver-class:
   ldap:
     enabled: false
