@@ -37,22 +37,26 @@ public class EvidenceProvider {
         resourceProviders = new HashMap<>();
         resourceQueries = new HashMap<>();
         connections = new HashMap<>();
-        configuration.getEvidenceProviders().forEach((name, settings) -> {
-            ApplicationConfiguration.EvidenceProviderConfig.ProviderConfig providerConfig = settings.getProvider();
-            ApplicationConfiguration.EvidenceProviderConfig.ConnectionConfig connConfig = settings.getConnection();
-            try {
-                ResourceProvider provider = (ResourceProvider) Class.forName(providerConfig.getClazz()).getDeclaredConstructor().newInstance();
-                provider.init(name, providerConfig.getConfig());
-                resourceProviders.put(name, provider);
-                resourceQueries.put(name, initResourceQueries(provider));
+        if (configuration.getEvidenceProviders() != null) {
+            configuration.getEvidenceProviders().forEach((name, settings) -> {
+                ApplicationConfiguration.EvidenceProviderConfig.ProviderConfig providerConfig = settings.getProvider();
+                ApplicationConfiguration.EvidenceProviderConfig.ConnectionConfig connConfig = settings.getConnection();
+                try {
+                    ResourceProvider provider = (ResourceProvider) Class.forName(providerConfig.getClazz()).getDeclaredConstructor().newInstance();
+                    provider.init(name, providerConfig.getConfig());
+                    resourceProviders.put(name, provider);
+                    resourceQueries.put(name, initResourceQueries(provider));
 
-                Class.forName(connConfig.getDriverClass());
-                connections.put(name, DriverManager.getConnection(connConfig.getUrl())); // todo handle more config settings
-            } catch (InstantiationException | IllegalAccessException | InvocationTargetException |
-                     NoSuchMethodException | ClassNotFoundException | SQLException e) {
-                throw new RuntimeException(e);
-            }
-        });
+                    Class.forName(connConfig.getDriverClass());
+                    connections.put(name, DriverManager.getConnection(connConfig.getUrl())); // todo handle more config settings
+                } catch (InstantiationException | IllegalAccessException | InvocationTargetException |
+                         NoSuchMethodException | ClassNotFoundException | SQLException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        } else {
+            // TODO warn
+        }
     }
 
     private Map<ClinicalEntityType, String> initResourceQueries(ResourceProvider resourceProvider) {
