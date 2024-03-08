@@ -53,7 +53,7 @@ public class JDBCBackedStorage {
             // If the user has any role grant, then user can at least view said project and it should be returned
             // If the project exists in project archive (pa.row_uid is not null) then do not return to user.
             PreparedStatement ps = conn.prepareStatement(
-                    "SELECT p.project_uid, p.project_name FROM " + schema + ".projects p " +
+                    "SELECT p.project_uid, p.project_name, p.project_desc FROM " + schema + ".projects p " +
                             "JOIN " + schema + ".project_role_grants prg ON p.project_uid = prg.project_uid " +
                             "LEFT JOIN " + schema + ".project_archive pa ON p.project_uid = pa.project_uid " +
                             "WHERE prg.user_uid = ? AND pa.row_uid IS NULL"
@@ -64,6 +64,7 @@ public class JDBCBackedStorage {
                 Project project = new Project();
                 project.setName(rs.getString("project_name"));
                 project.setUid(UUID.fromString(rs.getString("project_uid")));
+                project.setDescription(rs.getString("project_desc"));
                 ret.add(project);
             }
             return ret;
